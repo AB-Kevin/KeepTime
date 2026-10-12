@@ -1,7 +1,7 @@
 {
   "name": "contractor-time-desktop",
   "productName": "Contractor Time",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Time tracking and invoicing for remote contractors, kept in a shared OneDrive folder.",
   "author": "Anabaptist Brotherhood",
   "main": "src/main/main.js",
