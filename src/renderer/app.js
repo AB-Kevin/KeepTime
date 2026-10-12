@@ -200,7 +200,7 @@ function drawShell() {
   root.innerHTML = html`
     <header class="app-header">
       <div class="brand"><img class="logo" src="assets/logo-primary-lockup.jpg" alt="Anabaptist Brotherhood"><span class="app-name">Contractor Time</span></div>
-      <div class="who"><span>Signed in as <strong>${state.me.name}</strong></span>
+      <div class="who"><span id="update-badge"></span><span>Signed in as <strong>${state.me.name}</strong></span>
         <button class="btn btn-secondary btn-sm" data-action="logout">Sign out</button></div>
     </header>
     <div class="app-body">
@@ -213,6 +213,7 @@ function drawShell() {
       </nav>
       <main class="content" id="content"><p class="loading">Loading…</p></main>
     </div>`.s;
+  drawUpdates();
 }
 
 function stopTimers() {
@@ -507,7 +508,7 @@ async function profileView() {
         <button class="btn btn-secondary" type="submit">Change PIN</button>
       </form>
     </div>
-    ${me.manager ? '' : appearanceSection()}
+    ${me.manager ? '' : [appearanceSection(), updatesSection()]}
   </div>`;
 }
 
@@ -814,6 +815,58 @@ document.addEventListener('change', async (event) => {
   }
 });
 
+// Updates: on Settings for managers and on Profile for everyone else, like Appearance.
+// state.release is the last check's result, { version, newer, publishedAt, hasInstaller }.
+// percent: how much of the installer has downloaded, while it downloads.
+const update = { checking: false, checked: false, installing: false, percent: null };
+const updatesView = () => (state.me.manager ? 'settings' : 'profile');
+
+function updatesSection() {
+  const { checking, checked, installing, percent } = update;
+  const release = state.release;
+  const status = checking ? 'Checking for updates…' : checked && release && !release.newer ? 'You have the latest version.' : '';
+  return html`<div class="section" id="updates"><h2>Updates</h2>
+    <p class="small muted" style="margin: 4px 0 12px">This is version ${state.version}. ${status}</p>
+    ${release?.newer
+      ? html`<div class="notice" style="margin-bottom: 12px"><strong>Version ${release.version} is available.</strong>
+          ${release.publishedAt ? `Released ${Fmt.date(release.publishedAt)}. ` : ''}${release.hasInstaller
+            ? 'Contractor Time closes while the update installs. Your time and invoices are kept.'
+            : "Its installer isn't ready yet. Try again in a few minutes."}</div>`
+      : ''}
+    <div class="actions">
+      ${release?.newer && release.hasInstaller
+        ? html`<button class="btn btn-primary" data-action="install-update"${flag(installing, 'disabled')}>${!installing
+            ? 'Download and install'
+            : percent === 100 ? 'Downloaded' : `Downloading…${percent === null ? '' : ` ${percent}%`}`}</button>`
+        : ''}
+      <button class="btn btn-secondary" data-action="check-update"${flag(checking || installing, 'disabled')}>Check for updates</button>
+      <button class="btn btn-ghost" data-action="release-page">What's new</button>
+    </div></div>`;
+}
+
+/** Redraws the Updates section, if it's showing, and the header's note that an update is waiting. */
+function drawUpdates() {
+  const section = $('#updates');
+  if (section) section.outerHTML = updatesSection().s;
+  const badge = $('#update-badge');
+  if (badge) {
+    badge.innerHTML = state.release?.newer
+      ? html`<button class="btn btn-secondary btn-sm" data-action="nav" data-view="${updatesView()}">Update available</button>`.s
+      : '';
+  }
+}
+
+api.onUpdateFound((release) => {
+  if (!state) return;
+  state.release = release;
+  drawUpdates();
+});
+
+api.onUpdateProgress(({ percent }) => {
+  update.percent = percent;
+  drawUpdates();
+});
+
 // Manager: settings ---------------------------------------------------------------------------------
 
 async function settingsView() {
@@ -838,6 +891,7 @@ async function settingsView() {
         <button class="btn btn-ghost" data-action="change-folder">Use a different folder on this computer</button></div>
     </div>
     ${appearanceSection()}
+    ${updatesSection()}
   </div>`;
 }
 
@@ -1039,6 +1093,33 @@ const ACTIONS = {
   },
 
   'open-folder': () => api.openFolder(),
+
+  async 'check-update'() {
+    update.checking = true;
+    drawUpdates();
+    try {
+      state.release = await api.checkForUpdate();
+      update.checked = true;
+    } finally {
+      update.checking = false;
+      drawUpdates();
+    }
+  },
+
+  // Asks first, and closes the app if the update is installed.
+  async 'install-update'() {
+    update.installing = true;
+    drawUpdates();
+    try {
+      await api.installUpdate();
+    } finally {
+      update.installing = false;
+      update.percent = null;
+      drawUpdates();
+    }
+  },
+
+  'release-page': () => api.openReleasePage(),
 
   async logout() {
     state = await api.logout();

@@ -4,7 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme } = require('electron');
+const { spawn } = require('child_process');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme, net } = require('electron');
 const { readJson, writeJson } = require('./jsonfile');
 const { Store } = require('./store');
 const { pinProblem, hashPin, verifyPin, currentPin, Lockout } = require('./auth');
@@ -14,6 +15,7 @@ const { renderInvoice } = require('./invoice-html');
 const presence = require('./presence');
 const manage = require('./manage');
 const Fmt = require('../shared/format');
+const { RELEASES_PAGE, checkForUpdate, downloadInstaller } = require('./updates');
 
 const APP_ID = 'org.anabaptistbrotherhood.contractortime';
 const APP_ICON = path.join(__dirname, '..', '..', 'build', 'icon.png');
@@ -36,6 +38,10 @@ let heartbeat = null;
 let quitting = false;
 const lockout = new Lockout();
 const savedFiles = new Set(); // PDFs saved this session, which the window may ask to open
+let latestRelease = null; // from the last update check; updates are only downloaded from it
+let installing = null;
+
+const updatesDir = () => path.join(app.getPath('temp'), 'Contractor Time updates');
 
 /** A problem to show the person as-is, rather than as a failure. */
 class UserError extends Error {}
@@ -257,10 +263,76 @@ async function outputInvoice(invoice, action) {
   throw new Error(`Unknown invoice action ${action}`);
 }
 
+// Updates -----------------------------------------------------------------------
+
+/** The window's view of the last update check: { version, newer, publishedAt, hasInstaller }, or null. */
+function releaseInfo() {
+  if (!latestRelease) return null;
+  const { version, newer, publishedAt, installer } = latestRelease;
+  return { version, newer, publishedAt, hasInstaller: Boolean(installer) };
+}
+
+/** Looks for an update when the app opens, so the window can say one is waiting. Problems are left for a manual check to report. */
+function checkQuietly() {
+  if (!app.isPackaged) return;
+  checkForUpdate(app.getVersion(), net.fetch)
+    .then((release) => {
+      latestRelease = release;
+      if (release.newer) win?.webContents.send('update-found', releaseInfo());
+    })
+    .catch(() => {});
+}
+
+/** Downloads the release found by the last check, and installs it once the person agrees. */
+async function installUpdate() {
+  const release = latestRelease;
+  if (!release?.newer || !release.installer) throw new UserError('Check for updates first.');
+  if (!app.isPackaged) throw new UserError('Updates are installed from the installed app, not from a development copy.');
+
+  let lastPercent = -1;
+  const installer = await downloadInstaller(release.installer, updatesDir(), net.fetch, (received, total) => {
+    const percent = Math.floor((received / total) * 100);
+    if (percent !== lastPercent) win?.webContents.send('update-progress', { percent: (lastPercent = percent) });
+  }).catch((err) => {
+    throw new UserError(err.message);
+  });
+
+  let timerRunning = false;
+  try {
+    timerRunning = Boolean(session && time.running(store.entries(session.personId)));
+  } catch {
+    // the folder may be unavailable; the update can still go ahead
+  }
+  const { response } = await dialog.showMessageBox(win, {
+    type: 'question',
+    title: 'Install update?',
+    message: `Install Contractor Time ${release.version} now?`,
+    detail: 'Contractor Time closes while the update installs. Your time and invoices are kept.'
+      + (timerRunning ? '\n\nYour timer keeps running while the update installs.' : ''),
+    buttons: ['Install now', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response !== 0) return { installing: false };
+
+  // --updated: the installer skips the pages asking where to install, waits
+  // for this app to close, and keeps the shortcuts as they are.
+  await new Promise((resolve, reject) => {
+    const child = spawn(installer, ['--updated'], { detached: true, stdio: 'ignore' });
+    child.once('spawn', resolve);
+    child.once('error', (err) => reject(new UserError(`The installer couldn't be started: ${err.message}`)));
+    child.unref();
+  });
+  quitting = true; // the person already chose; don't ask about the timer again
+  app.quit();
+  return { installing: true };
+}
+
 // Data the window shows ---------------------------------------------------------
 
 function appState() {
-  return { ...screenState(), theme: nativeTheme.themeSource };
+  return { ...screenState(), theme: nativeTheme.themeSource, version: app.getVersion(), release: releaseInfo() };
 }
 
 function screenState() {
@@ -417,6 +489,24 @@ function registerHandlers() {
     applyTheme();
     return theme;
   });
+
+  handle('update:check', async () => {
+    try {
+      latestRelease = await checkForUpdate(app.getVersion(), net.fetch);
+    } catch (err) {
+      throw new UserError(err.message);
+    }
+    return releaseInfo();
+  });
+
+  handle('update:install', () => {
+    installing ??= installUpdate().finally(() => {
+      installing = null;
+    });
+    return installing;
+  });
+
+  handle('update:page', () => shell.openExternal(latestRelease?.pageUrl ?? RELEASES_PAGE));
 
   handle('folder:open', () => {
     if (store) shell.openPath(store.dataDir);
@@ -757,9 +847,15 @@ app.whenReady().then(() => {
   );
   applyTheme();
   nativeTheme.on('updated', () => win?.setBackgroundColor(windowBackground()));
+  try {
+    fs.rmSync(updatesDir(), { recursive: true, force: true });
+  } catch {
+    // The installer that just ran may still be closing; it is removed next time.
+  }
   openStore();
   registerHandlers();
   createWindow();
+  checkQuietly();
 });
 
 app.on('will-quit', () => signOut());
