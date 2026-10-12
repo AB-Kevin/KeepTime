@@ -1,0 +1,767 @@
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { pathToFileURL } = require('url');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme } = require('electron');
+const { readJson, writeJson } = require('./jsonfile');
+const { Store } = require('./store');
+const { pinProblem, hashPin, verifyPin, currentPin, Lockout } = require('./auth');
+const time = require('./time');
+const invoices = require('./invoices');
+const { renderInvoice } = require('./invoice-html');
+const presence = require('./presence');
+const manage = require('./manage');
+const Fmt = require('../shared/format');
+
+const APP_ID = 'org.anabaptistbrotherhood.contractortime';
+const APP_ICON = path.join(__dirname, '..', '..', 'build', 'icon.png');
+// The window's color before the page paints: --surface-page in styles.css.
+const WINDOW_BACKGROUND = { light: '#FFFFFF', dark: '#1E1C1D' };
+const THEMES = ['system', 'light', 'dark'];
+const FONT_DIR = path.join(__dirname, '..', '..', 'node_modules', '@fontsource', 'poppins', 'files');
+
+// Lets a test run keep its settings apart from this computer's real ones.
+if (process.env.CONTRACTOR_TIME_PROFILE) app.setPath('userData', process.env.CONTRACTOR_TIME_PROFILE);
+
+// One copy per Windows account; on a shared remote desktop server each person has their own.
+const isPrimaryInstance = app.requestSingleInstanceLock();
+if (!isPrimaryInstance) app.quit();
+
+let win = null;
+let store = null;
+let session = null; // { personId, signedInAt }
+let heartbeat = null;
+let quitting = false;
+const lockout = new Lockout();
+const savedFiles = new Set(); // PDFs saved this session, which the window may ask to open
+
+/** A problem to show the person as-is, rather than as a failure. */
+class UserError extends Error {}
+const fail = (errors) => {
+  if (errors.length) throw new UserError(errors.join(' '));
+};
+
+// This computer's settings: only where the data folder is and who signed in last.
+const configPath = () => path.join(app.getPath('userData'), 'config.json');
+const loadConfig = () => readJson(configPath(), {});
+const saveConfig = (changes) => writeJson(configPath(), { ...loadConfig(), ...changes });
+
+function openStore() {
+  const { dataDir } = loadConfig();
+  store = dataDir && fs.existsSync(dataDir) ? new Store(dataDir) : null;
+}
+
+// Light, dark, or whatever Windows is set to. Each computer keeps its own; the
+// window's prefers-color-scheme follows nativeTheme.themeSource.
+const windowBackground = () => WINDOW_BACKGROUND[nativeTheme.shouldUseDarkColors ? 'dark' : 'light'];
+
+function applyTheme() {
+  const { theme } = loadConfig();
+  nativeTheme.themeSource = THEMES.includes(theme) ? theme : 'system';
+}
+
+function suggestedFolder() {
+  const oneDrive = process.env.OneDriveCommercial || process.env.OneDrive;
+  return oneDrive ? path.join(oneDrive, 'Contractor Time') : null;
+}
+
+// Session -------------------------------------------------------------------
+
+function me() {
+  if (!store || !session) throw new UserError('Sign in first.');
+  const person = store.people().find((p) => p.id === session.personId);
+  if (!person?.active) {
+    signOut();
+    throw new UserError('Your account has been turned off. Ask a manager if that is a mistake.');
+  }
+  return person;
+}
+
+function asContractor() {
+  const person = me();
+  if (!person.contractor) throw new UserError('Only contractors can do that.');
+  return person;
+}
+
+function asManager() {
+  const person = me();
+  if (!person.manager) throw new UserError('Only managers can do that.');
+  return person;
+}
+
+const publicPerson = ({ pin, ...person }) => person;
+
+function writePresence(signedOut = false) {
+  if (!store || !session) return;
+  const person = store.people().find((p) => p.id === session.personId);
+  store.savePresence(session.personId, {
+    personId: session.personId,
+    name: person?.name ?? '',
+    computer: presence.computerName(),
+    signedInAt: session.signedInAt,
+    seen: new Date().toISOString(),
+    signedOut,
+    appVersion: app.getVersion(),
+  });
+}
+
+function signOut() {
+  clearInterval(heartbeat);
+  heartbeat = null;
+  try {
+    writePresence(true);
+  } catch {
+    // the folder may be gone; nothing to record
+  }
+  session = null;
+}
+
+// Window ----------------------------------------------------------------------
+
+function createWindow() {
+  win = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 900,
+    minHeight: 600,
+    title: 'Contractor Time',
+    icon: APP_ICON,
+    backgroundColor: windowBackground(),
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  win.webContents.on('will-navigate', (event) => event.preventDefault());
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.on('close', confirmClose);
+  // Invoice windows close with it.
+  win.on('closed', () => {
+    win = null;
+    app.quit();
+  });
+  win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+}
+
+/** Asks before closing with the timer running, and offers to stop it. */
+function confirmClose(event) {
+  if (quitting || !session) return;
+  let entry;
+  try {
+    entry = time.running(store.entries(session.personId));
+  } catch {
+    return;
+  }
+  if (!entry) return;
+  event.preventDefault();
+  const described = Boolean(entry.taskId || entry.note);
+  const buttons = described ? ['Stop timer and quit', 'Quit, keep timer running', 'Cancel'] : ['Quit, keep timer running', 'Cancel'];
+  dialog
+    .showMessageBox(win, {
+      type: 'question',
+      title: 'Contractor Time',
+      message: 'Your timer is still running.',
+      detail: described
+        ? `It started at ${Fmt.time(entry.start)}. If you leave it running, it keeps counting until you stop it.`
+        : `It started at ${Fmt.time(entry.start)}. To stop it, cancel and describe what you worked on. If you leave it running, it keeps counting until you stop it.`,
+      buttons,
+      cancelId: buttons.length - 1,
+      defaultId: 0,
+      noLink: true,
+    })
+    .then(({ response }) => {
+      const choice = buttons[response];
+      if (choice === 'Cancel') return;
+      if (choice === 'Stop timer and quit') {
+        const entries = store.entries(session.personId);
+        const errors = time.updateTimer(entries, store.tasks(), { taskId: entry.taskId, note: entry.note }, new Date(), { stop: true });
+        if (errors.length) {
+          dialog.showErrorBox('Contractor Time', errors.join(' '));
+          return;
+        }
+        store.saveEntries(session.personId, entries);
+      }
+      quitting = true;
+      win.close();
+    });
+}
+
+// Invoices on paper and PDF ------------------------------------------------------
+
+function fontCss() {
+  return [300, 400, 500, 600, 700]
+    .map((weight) => {
+      const url = pathToFileURL(path.join(FONT_DIR, `poppins-latin-${weight}-normal.woff2`)).href;
+      return `@font-face{font-family:'Poppins';font-style:normal;font-weight:${weight};src:url('${url}') format('woff2');}`;
+    })
+    .join('\n');
+}
+
+async function invoicePage(invoice, show) {
+  const page = new BrowserWindow({
+    show,
+    width: 940,
+    height: 1100,
+    title: invoice.number,
+    icon: APP_ICON,
+    autoHideMenuBar: true,
+    webPreferences: { javascript: false, sandbox: true, contextIsolation: true },
+  });
+  page.webContents.on('will-navigate', (event) => event.preventDefault());
+  // A file, not a data: URL, so the page may load the bundled fonts.
+  const file = path.join(app.getPath('temp'), `contractor-time-${crypto.randomUUID()}.html`);
+  fs.writeFileSync(file, renderInvoice(invoice, fontCss()));
+  try {
+    await page.loadFile(file);
+  } finally {
+    fs.rm(file, () => {});
+  }
+  return page;
+}
+
+async function outputInvoice(invoice, action) {
+  if (action === 'view') {
+    await invoicePage(invoice, true);
+    return null;
+  }
+  if (action === 'print') {
+    const page = await invoicePage(invoice, false);
+    return new Promise((resolve, reject) => {
+      page.webContents.print({ printBackground: true }, (ok, reason) => {
+        page.destroy();
+        if (ok || reason === 'cancelled' || reason === 'Print job canceled') resolve(null);
+        else reject(new UserError(`The invoice didn't print: ${reason}.`));
+      });
+    });
+  }
+  if (action === 'pdf') {
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: 'Save invoice as PDF',
+      defaultPath: path.join(app.getPath('documents'), `${invoice.number}.pdf`),
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (canceled || !filePath) return null;
+    const page = await invoicePage(invoice, false);
+    try {
+      fs.writeFileSync(filePath, await page.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true }));
+    } finally {
+      page.destroy();
+    }
+    savedFiles.add(filePath);
+    return filePath;
+  }
+  throw new Error(`Unknown invoice action ${action}`);
+}
+
+// Data the window shows ---------------------------------------------------------
+
+function appState() {
+  return { ...screenState(), theme: nativeTheme.themeSource };
+}
+
+function screenState() {
+  const config = loadConfig();
+  if (!store) return { screen: 'folder', dataDir: config.dataDir ?? null, suggested: suggestedFolder() };
+  if (!store.isDataFolder()) return { screen: 'setup', dataDir: store.dataDir };
+  if (!session) {
+    const people = store
+      .people()
+      .filter((p) => p.active)
+      .map(({ id, name }) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { screen: 'login', dataDir: store.dataDir, people, lastPersonId: config.lastPersonId ?? null };
+  }
+  return {
+    screen: 'app',
+    dataDir: store.dataDir,
+    computer: presence.computerName(),
+    me: publicPerson(me()),
+    settings: store.settings(),
+    tasks: store.tasks(),
+  };
+}
+
+const startOfToday = () => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const startOfWeek = () => {
+  const d = startOfToday();
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // Monday
+  return d;
+};
+
+function withBlockedReasons(entries, settings, now) {
+  return entries.map((e) => ({ ...e, blockedReason: time.editBlockedReason(e, settings, now) }));
+}
+
+function entriesBetween(entries, from, to) {
+  const start = Fmt.toDate(from);
+  const end = Fmt.toDate(to);
+  end.setDate(end.getDate() + 1);
+  return entries
+    .filter((e) => !e.deleted)
+    .filter((e) => {
+      const t = Date.parse(e.start);
+      return t >= start.getTime() && t < end.getTime();
+    })
+    .sort((a, b) => b.start.localeCompare(a.start));
+}
+
+/** The template a person's invoices use: theirs if set and still there, else the default, else the first. */
+function templateFor(person) {
+  const templates = store.templates();
+  const { defaultTemplateId } = store.settings();
+  return (
+    templates.find((t) => t.id === person.templateId) ??
+    templates.find((t) => t.id === defaultTemplateId) ??
+    templates[0] ??
+    null
+  );
+}
+
+function findInvoice(personId, id) {
+  const invoice = store.invoices(personId).find((i) => i.id === id);
+  if (!invoice) throw new UserError("That invoice doesn't exist.");
+  return invoice;
+}
+
+function overview() {
+  const now = Date.now();
+  const settings = store.settings();
+  const week = startOfWeek();
+  const tomorrow = startOfToday();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const rows = store
+    .people()
+    .filter((p) => p.active)
+    .map((p) => {
+      const seen = store.presence(p.id);
+      const row = {
+        id: p.id,
+        name: p.name,
+        contractor: p.contractor,
+        manager: p.manager,
+        signedIn: presence.isSignedIn(seen, now),
+        computer: seen?.computer ?? null,
+        seen: seen?.seen ?? null,
+        signedOut: seen?.signedOut ?? null,
+        running: null,
+        weekHours: 0,
+        uninvoicedHours: 0,
+        problem: null,
+      };
+      if (!p.contractor) return row;
+      try {
+        const entries = store.entries(p.id);
+        const run = time.running(entries);
+        if (run) {
+          row.running = {
+            start: run.start,
+            description: run.taskId || run.note ? time.describe(run) : null,
+            long: now - Date.parse(run.start) > settings.longTimerHours * 3600e3,
+          };
+        }
+        row.weekHours = time.hoursBetween(entries, week, tomorrow);
+        row.uninvoicedHours = Fmt.hoursOf(
+          entries.filter((e) => !e.deleted && e.end && !e.invoiceId).reduce((ms, e) => ms + Date.parse(e.end) - Date.parse(e.start), 0),
+        );
+      } catch (err) {
+        row.problem = err.message;
+      }
+      return row;
+    })
+    .sort((a, b) => Number(b.signedIn) - Number(a.signedIn) || a.name.localeCompare(b.name));
+  return { rows, strayFiles: store.strayFiles(), longTimerHours: settings.longTimerHours };
+}
+
+// IPC -----------------------------------------------------------------------------
+
+function handle(channel, fn) {
+  ipcMain.handle(channel, async (_event, ...args) => {
+    try {
+      return { ok: true, value: await fn(...args) };
+    } catch (err) {
+      if (!(err instanceof UserError)) console.error(channel, err);
+      return { ok: false, error: err instanceof UserError ? err.message : `Something went wrong: ${err.message}` };
+    }
+  });
+}
+
+function registerHandlers() {
+  handle('state:get', () => appState());
+
+  handle('folder:choose', async () => {
+    const suggested = suggestedFolder();
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: 'Choose the Contractor Time data folder',
+      defaultPath: store?.dataDir ?? (suggested && fs.existsSync(path.dirname(suggested)) ? path.dirname(suggested) : undefined),
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (canceled || !filePaths[0]) return appState();
+    if (session) signOut();
+    saveConfig({ dataDir: filePaths[0] });
+    openStore();
+    return appState();
+  });
+
+  handle('theme:set', (theme) => {
+    if (!THEMES.includes(theme)) throw new UserError('Choose a theme.');
+    saveConfig({ theme });
+    applyTheme();
+    return theme;
+  });
+
+  handle('folder:open', () => {
+    if (store) shell.openPath(store.dataDir);
+  });
+
+  handle('setup:create', ({ name, pin, contractor }) => {
+    if (!store || store.isDataFolder()) throw new UserError('This folder is already set up.');
+    const now = new Date();
+    const people = [];
+    const { errors, person } = manage.savePerson(people, { name, pin, manager: true, contractor, hourlyRate: 0 }, null, now);
+    fail(errors);
+    const template = invoices.newTemplate();
+    store.saveTemplates([template]);
+    store.saveTasks([]);
+    store.saveSettings({ ...store.settings(), defaultTemplateId: template.id });
+    store.savePeople(people); // last, since its presence marks the folder as set up
+    session = { personId: person.id, signedInAt: now.toISOString() };
+    startHeartbeat();
+    saveConfig({ lastPersonId: person.id });
+    return appState();
+  });
+
+  handle('auth:login', ({ personId, pin }) => {
+    if (!store) throw new UserError('Choose the data folder first.');
+    const wait = lockout.wait(personId);
+    if (wait) throw new UserError(`Too many wrong PINs. Try again in ${wait} seconds.`);
+    const person = store.people().find((p) => p.id === personId && p.active);
+    if (!person) throw new UserError('Choose your name.');
+    if (!verifyPin(pin, currentPin(person, store.profile(person.id)))) {
+      lockout.fail(personId);
+      throw new UserError("That PIN isn't right.");
+    }
+    lockout.clear(personId);
+    // Two computers saving the same person's time would make OneDrive keep two copies.
+    const elsewhere = store.presence(person.id);
+    if (presence.isSignedIn(elsewhere) && elsewhere.computer !== presence.computerName()) {
+      const minutes = presence.minutesUntilStale(elsewhere);
+      throw new UserError(
+        `You're signed in on ${elsewhere.computer}. Sign out there first. If that computer is off or asleep, you can sign in here in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+      );
+    }
+    session = { personId: person.id, signedInAt: new Date().toISOString() };
+    startHeartbeat();
+    saveConfig({ lastPersonId: person.id });
+    return appState();
+  });
+
+  handle('auth:logout', () => {
+    signOut();
+    return appState();
+  });
+
+  // Contractor: timer and time ------------------------------------------------------
+
+  handle('timer:get', () => {
+    const person = asContractor();
+    const entries = store.entries(person.id);
+    const today = startOfToday();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return {
+      running: time.running(entries),
+      today: entries
+        .filter((e) => !e.deleted && Date.parse(e.start) >= today.getTime())
+        .sort((a, b) => b.start.localeCompare(a.start)),
+      todayHours: time.hoursBetween(entries, today, tomorrow),
+      weekHours: time.hoursBetween(entries, startOfWeek(), tomorrow),
+    };
+  });
+
+  const changeEntries = (change) => {
+    const person = asContractor();
+    const entries = store.entries(person.id);
+    fail(change(entries, store.tasks(), store.settings(), new Date()));
+    store.saveEntries(person.id, entries);
+    writePresence();
+  };
+
+  handle('timer:start', (input) => changeEntries((entries, tasks, _s, now) => time.startTimer(entries, tasks, input, now)));
+  handle('timer:describe', (input) => changeEntries((entries, tasks, _s, now) => time.updateTimer(entries, tasks, input, now, { stop: false })));
+  handle('timer:stop', (input) => changeEntries((entries, tasks, _s, now) => time.updateTimer(entries, tasks, input, now, { stop: true })));
+  handle('entries:add', (input) => changeEntries((entries, tasks, s, now) => time.addEntry(entries, tasks, s, input, now)));
+  handle('entries:edit', (id, input) => changeEntries((entries, tasks, s, now) => time.editEntry(entries, tasks, s, id, input, now)));
+  handle('entries:delete', (id) => changeEntries((entries, _t, s, now) => time.deleteEntry(entries, s, id, now)));
+
+  handle('entries:list', ({ from, to }) => {
+    const person = asContractor();
+    const list = entriesBetween(store.entries(person.id), from, to);
+    return withBlockedReasons(list, store.settings(), new Date());
+  });
+
+  // Contractor: invoices and profile ---------------------------------------------------
+
+  handle('invoices:mine', () => {
+    const person = asContractor();
+    const list = store.invoices(person.id).sort((a, b) => b.issued.localeCompare(a.issued));
+    const entries = store.entries(person.id).filter((e) => !e.deleted && e.end && !e.invoiceId);
+    const first = entries.reduce((min, e) => (!min || e.start < min ? e.start : min), null);
+    return {
+      invoices: list,
+      suggested: { from: first ? Fmt.dayKey(first) : Fmt.dayKey(new Date()), to: Fmt.dayKey(new Date()) },
+      template: templateFor(person)?.name ?? null,
+      rate: person.hourlyRate,
+    };
+  });
+
+  handle('invoices:preview', ({ from, to }) => {
+    const person = asContractor();
+    const template = templateFor(person);
+    if (!template) throw new UserError('No invoice template is set up yet. Ask a manager to add one.');
+    const p = invoices.preview(store.entries(person.id), from, to, person.hourlyRate, template.detail);
+    return { lines: p.lines, hours: p.hours, rate: p.rate, amount: p.amount, count: p.entries.length };
+  });
+
+  handle('invoices:issue', ({ from, to }) => {
+    const person = asContractor();
+    const entries = store.entries(person.id);
+    const list = store.invoices(person.id);
+    const result = invoices.issue({
+      entries,
+      invoices: list,
+      person,
+      profile: store.profile(person.id),
+      template: templateFor(person),
+      from,
+      to,
+      now: new Date(),
+    });
+    fail(result.errors);
+    // The invoice first: if saving the entries then fails, nothing is billed twice.
+    store.saveInvoices(person.id, list);
+    store.saveEntries(person.id, entries);
+    return result.invoice;
+  });
+
+  handle('invoices:void', ({ id, reason }) => {
+    const person = asContractor();
+    const entries = store.entries(person.id);
+    const list = store.invoices(person.id);
+    fail(invoices.voidInvoice({ entries, invoices: list, id, reason, now: new Date() }));
+    store.saveInvoices(person.id, list);
+    store.saveEntries(person.id, entries);
+  });
+
+  handle('invoice:output', ({ personId, id, action }) => {
+    const person = me();
+    if (personId !== person.id && !person.manager) throw new UserError("You can only open your own invoices.");
+    return outputInvoice(findInvoice(personId, id), action);
+  });
+
+  handle('profile:get', () => {
+    const person = me();
+    const { pin, ...profile } = store.profile(person.id);
+    return profile;
+  });
+
+  handle('profile:save', (input) => {
+    const person = me();
+    const fields = ['businessName', 'address', 'email', 'phone', 'paymentInstructions'];
+    const profile = store.profile(person.id);
+    for (const field of fields) {
+      const value = String(input[field] ?? '').trim();
+      if (value.length > 1000) throw new UserError('Keep each field under 1,000 characters.');
+      profile[field] = value;
+    }
+    store.saveProfile(person.id, profile);
+  });
+
+  handle('pin:change', ({ current, next }) => {
+    const person = me();
+    const profile = store.profile(person.id);
+    if (!verifyPin(current, currentPin(person, profile))) throw new UserError("Your current PIN isn't right.");
+    fail([pinProblem(next)].filter(Boolean));
+    profile.pin = hashPin(next);
+    store.saveProfile(person.id, profile);
+  });
+
+  handle('open:file', (filePath) => {
+    if (!savedFiles.has(filePath)) throw new UserError("That file wasn't saved here.");
+    shell.openPath(filePath);
+  });
+
+  // Manager ---------------------------------------------------------------------------
+
+  handle('mgr:overview', () => {
+    asManager();
+    return overview();
+  });
+
+  handle('mgr:people', () => {
+    asManager();
+    const settings = store.settings();
+    return {
+      people: store
+        .people()
+        .map(publicPerson)
+        .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name)),
+      templates: store.templates().map(({ id, name }) => ({ id, name, isDefault: id === settings.defaultTemplateId })),
+    };
+  });
+
+  handle('mgr:person:save', (input) => {
+    const actor = asManager();
+    const people = store.people();
+    const { errors } = manage.savePerson(people, input, actor.id, new Date());
+    fail(errors);
+    store.savePeople(people);
+  });
+
+  handle('mgr:tasks:save', (input) => {
+    asManager();
+    const tasks = store.tasks();
+    fail(manage.saveTask(tasks, input));
+    store.saveTasks(tasks);
+    return tasks;
+  });
+
+  handle('mgr:tasks:move', ({ id, direction }) => {
+    asManager();
+    const tasks = store.tasks();
+    manage.moveTask(tasks, id, direction);
+    store.saveTasks(tasks);
+    return tasks;
+  });
+
+  handle('mgr:templates', () => {
+    asManager();
+    const settings = store.settings();
+    const people = store.people().filter((p) => p.active && p.contractor);
+    return {
+      templates: store.templates().map((t) => ({
+        ...t,
+        isDefault: t.id === settings.defaultTemplateId,
+        users: people.filter((p) => p.templateId === t.id).map((p) => p.name),
+      })),
+      detailOptions: invoices.DETAIL,
+    };
+  });
+
+  handle('mgr:template:new', () => {
+    asManager();
+    return invoices.newTemplate({ name: '' });
+  });
+
+  handle('mgr:template:save', (input) => {
+    asManager();
+    const templates = store.templates();
+    const fields = ['name', 'title', 'prefix', 'billToName', 'billToAddress', 'detail', 'paymentTerms', 'notes', 'footer'];
+    const clean = Object.fromEntries(fields.map((f) => [f, String(input[f] ?? '').trim()]));
+    clean.prefix = clean.prefix.toUpperCase();
+    const existing = templates.find((t) => t.id === input.id);
+    const template = { ...(existing ?? { id: input.id || crypto.randomUUID() }), ...clean };
+    fail(invoices.templateProblems(template, templates));
+    if (existing) Object.assign(existing, template);
+    else templates.push(template);
+    store.saveTemplates(templates);
+    const settings = store.settings();
+    if (!settings.defaultTemplateId) store.saveSettings({ ...settings, defaultTemplateId: template.id });
+    return template;
+  });
+
+  handle('mgr:template:default', (id) => {
+    asManager();
+    if (!store.templates().some((t) => t.id === id)) throw new UserError("That template doesn't exist.");
+    store.saveSettings({ ...store.settings(), defaultTemplateId: id });
+  });
+
+  handle('mgr:template:delete', (id) => {
+    asManager();
+    if (store.settings().defaultTemplateId === id) throw new UserError("The default template can't be deleted. Make another one the default first.");
+    const users = store.people().filter((p) => p.active && p.templateId === id);
+    if (users.length) {
+      throw new UserError(`${users.map((p) => p.name).join(', ')} ${users.length === 1 ? 'uses' : 'use'} this template. Change that on the People page first.`);
+    }
+    store.saveTemplates(store.templates().filter((t) => t.id !== id));
+  });
+
+  // Issued invoices keep their own copy of the template, so these previews are the only HTML built from unsaved input.
+  handle('mgr:template:preview', (input) => {
+    asManager();
+    return renderInvoice(invoices.sampleInvoice({ ...invoices.newTemplate(), ...input }), fontCss());
+  });
+
+  handle('mgr:settings:save', (input) => {
+    asManager();
+    fail(manage.settingsProblems(input));
+    store.saveSettings({
+      ...store.settings(),
+      editWindowDays: Number(input.editWindowDays),
+      longTimerHours: Number(input.longTimerHours),
+    });
+  });
+
+  handle('mgr:invoices', () => {
+    asManager();
+    const list = [];
+    for (const p of store.people().filter((x) => x.contractor)) {
+      for (const inv of store.invoices(p.id)) {
+        const { lines, template, entryIds, ...summary } = inv;
+        list.push({ ...summary, personId: p.id, personName: p.name, active: p.active });
+      }
+    }
+    return list.sort((a, b) => b.issued.localeCompare(a.issued));
+  });
+
+  handle('mgr:entries', ({ personId, from, to }) => {
+    asManager();
+    const person = store.people().find((p) => p.id === personId);
+    if (!person) throw new UserError('Choose a contractor.');
+    return entriesBetween(store.entries(person.id), from, to);
+  });
+}
+
+function startHeartbeat() {
+  clearInterval(heartbeat);
+  writePresence();
+  heartbeat = setInterval(() => {
+    try {
+      writePresence();
+    } catch (err) {
+      console.error('presence', err);
+    }
+  }, presence.HEARTBEAT_MS);
+}
+
+app.setAppUserModelId(APP_ID);
+
+app.on('second-instance', () => {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.focus();
+});
+
+app.whenReady().then(() => {
+  if (!isPrimaryInstance) return;
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([{ role: 'fileMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }]),
+  );
+  applyTheme();
+  nativeTheme.on('updated', () => win?.setBackgroundColor(windowBackground()));
+  openStore();
+  registerHandlers();
+  createWindow();
+});
+
+app.on('will-quit', () => signOut());
+
+app.on('window-all-closed', () => app.quit());
