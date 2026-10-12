@@ -10,6 +10,7 @@
     "postinstall": "node node_modules/electron/install.js",
     "start": "electron .",
     "test": "node --test \"test/*.test.js\"",
+    "preversion": "npm test",
     "dist": "electron-builder --win --publish never"
   },
   "dependencies": {
@@ -27,7 +28,12 @@
       "build/icon.png",
       "package.json"
     ],
-    "publish": null,
+    "publish": {
+      "provider": "github",
+      "owner": "AB-Kevin",
+      "repo": "contractor-time",
+      "releaseType": "release"
+    },
     "win": {
       "target": "nsis",
       "icon": "build/icon.png"

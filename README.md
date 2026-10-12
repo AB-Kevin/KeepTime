@@ -57,6 +57,20 @@ npm run dist   # build the Windows installer into dist/
 
 Set `CONTRACTOR_TIME_PROFILE` to a folder to run with settings kept apart from this computer's real ones.
 
+### Releasing
+
+Pushing a version tag builds the Windows installer on GitHub and publishes it as a release (`.github/workflows/release.yml`). Once your changes are committed:
+
+```
+npm version patch       # or minor / major: runs the tests, bumps the version, commits, and tags vX.Y.Z
+git push --follow-tags  # or run `git config push.followTags true` once, then plain `git push`
+```
+
+The release appears on the repository's **Releases** page a few minutes later as `ContractorTime-Setup-X.Y.Z.exe`, with a `latest.yml` beside it and notes listing the changes since the previous release. Follow the build under the **Actions** tab. The build stops without publishing if the tag doesn't match the version in package.json or a test fails.
+
+- `latest.yml` lists the installer's version, size and SHA-512 digest. AB Apps reads it from the latest release to install and update this app. electron-builder writes it because package.json's `build.publish` names this repository. Keep the tag as `vX.Y.Z` and leave `artifactName` as it is.
+- The installer isn't code-signed, so Windows SmartScreen shows "Windows protected your PC" the first time it runs. Choose **More info**, then **Run anyway**.
+
 | Path | What's there |
 | --- | --- |
 | `src/main/main.js` | windows, sign-in, and the handlers the window calls; checks roles |
