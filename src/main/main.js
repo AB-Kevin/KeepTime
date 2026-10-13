@@ -668,20 +668,11 @@ function registerHandlers() {
     };
   });
 
-  // The rate and template people set themselves are kept in their own
-  // profile.json, since only managers write shared/people.json.
+  // Kept in their own profile.json, since only managers write shared/people.json.
   handle('invoices:template', (id) => {
     const person = asContractor();
     if (id && !store.templates().some((t) => t.id === id)) throw new UserError("That template doesn't exist any more.");
     store.saveProfile(person.id, { ...store.profile(person.id), templateId: id || null, templateChosenAt: new Date().toISOString() });
-  });
-
-  handle('invoices:rate', (value) => {
-    const person = asContractor();
-    const rate = manage.parseRate(value);
-    if (rate == null) throw new UserError(manage.RATE_PROBLEM);
-    store.saveProfile(person.id, { ...store.profile(person.id), hourlyRate: rate, rateChosenAt: new Date().toISOString() });
-    return rate;
   });
 
   handle('invoices:preview', ({ from, to }) => {
@@ -742,6 +733,13 @@ function registerHandlers() {
       const value = String(input[field] ?? '').trim();
       if (value.length > 1000) throw new UserError('Keep each field under 1,000 characters.');
       profile[field] = value;
+    }
+    // Their own rate is kept here, since only managers write shared/people.json. It's dated only
+    // when changed, so saving other details doesn't undo a rate a manager set since.
+    if (person.contractor && 'hourlyRate' in input) {
+      const rate = manage.parseRate(input.hourlyRate);
+      if (rate == null) throw new UserError(manage.RATE_PROBLEM);
+      if (rate !== person.hourlyRate) Object.assign(profile, { hourlyRate: rate, rateChosenAt: new Date().toISOString() });
     }
     store.saveProfile(person.id, profile);
   });

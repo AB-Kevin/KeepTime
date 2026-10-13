@@ -449,18 +449,16 @@ async function invoicesView() {
   return html`<div class="page">
     <div class="page-head"><div><h1>My invoices</h1>
       <p class="sub">Invoices use the ${data.template ? `"${data.template}"` : 'default'} template${data.rate > 0 ? ` and your rate of ${Fmt.money(data.rate)} an hour` : ''}.</p></div></div>
-    ${noRate ? html`<div class="notice warn">Your hourly rate hasn't been set, so you can't create invoices yet. Enter it below.</div>` : ''}
-    <div class="field-row" style="max-width: 640px">
-      <div class="field"><label for="my-rate">Hourly rate ($)</label>
-        <input type="number" id="my-rate" min="0" step="0.01" value="${data.rate || ''}">
-        <span class="hint">For invoices you create from now on.</span></div>
-      <div class="field"><label for="my-template">Invoice template</label>
-        <select id="my-template">
-          <option value="">Default${def ? ` (${def.name})` : ''}</option>
-          ${data.templates.filter((t) => !t.isDefault).map((t) => html`<option value="${t.id}"${flag(t.id === data.templateId, 'selected')}>${t.name}</option>`)}</select>
-        <span class="hint">Templates are changed on the
-          <button class="link" data-action="nav" data-view="templates">Invoice templates</button> page.</span></div>
-    </div>
+    ${noRate
+      ? html`<div class="notice warn">Your hourly rate hasn't been set, so you can't create invoices yet. Set it on your
+          <button class="link" data-action="nav" data-view="profile">Profile</button>.</div>`
+      : ''}
+    <div class="field" style="max-width: 360px"><label for="my-template">Invoice template</label>
+      <select id="my-template">
+        <option value="">Default${def ? ` (${def.name})` : ''}</option>
+        ${data.templates.filter((t) => !t.isDefault).map((t) => html`<option value="${t.id}"${flag(t.id === data.templateId, 'selected')}>${t.name}</option>`)}</select>
+      <span class="hint">For invoices you create from now on. Templates are changed on the
+        <button class="link" data-action="nav" data-view="templates">Invoice templates</button> page.</span></div>
     <h2>New invoice</h2>
     <p class="small muted" style="margin-top: 4px">Choose the period to bill. Only completed time that isn't already on an invoice is included.</p>
     ${periodFilter('invoice-preview', ui.invoiceFrom, ui.invoiceTo, { button: 'Preview' })}
@@ -494,9 +492,12 @@ async function profileView() {
     <div class="page-head"><div><h1>Profile</h1><p class="sub">${me.name}, ${roles}${me.contractor ? `, ${me.hourlyRate > 0 ? Fmt.money(me.hourlyRate) + ' an hour' : 'no hourly rate set yet'}` : ''}</p></div></div>
     ${me.contractor
       ? html`<h2>Your details on invoices</h2>
-        <p class="small muted" style="margin: 4px 0 16px">Printed in the "from" block of new invoices. Invoices you've already created keep the details they were made with.</p>
+        <p class="small muted" style="margin: 4px 0 16px">Your rate, and what's printed in the "from" block of new invoices. Invoices you've already created keep the details they were made with.</p>
         <form data-form="profile">
           <div class="form-error"></div>
+          <div class="field" style="max-width: 240px"><label for="p-rate">Hourly rate ($)</label>
+            <input type="number" id="p-rate" name="hourlyRate" min="0" step="0.01" value="${me.hourlyRate || ''}">
+            <span class="hint">For invoices you create from now on. A manager can also change it.</span></div>
           <div class="field"><label for="p-business">Business name</label><input type="text" id="p-business" name="businessName" maxlength="200" value="${profile.businessName ?? ''}">
             <span class="hint">Leave blank to show your name.</span></div>
           <div class="field"><label for="p-address">Address</label><textarea id="p-address" name="address" maxlength="500">${profile.address ?? ''}</textarea></div>
@@ -659,7 +660,7 @@ function personDialog(person) {
         <option value="">Default${def ? ` (${def.name})` : ''}</option>
         ${templates.map((t) => html`<option value="${t.id}"${flag(t.id === person.templateId, 'selected')}>${t.name}</option>`)}</select></div>
     </div>
-    <p class="small muted">They can also set their own rate and template on My invoices; whichever was changed more recently is used.
+    <p class="small muted">They can also set their own rate on their Profile and template on My invoices; whichever was changed more recently is used.
     Their name, and whether they're a manager or can sign in, are changed in AB Apps.</p>
     <div class="dialog-actions">
       <button class="btn btn-primary" type="submit">Save</button>
@@ -826,22 +827,14 @@ document.addEventListener('change', async (event) => {
   }
 });
 
-// The rate and template someone's own invoices use, set on My invoices.
+// The template someone's own invoices use, chosen on My invoices.
 document.addEventListener('change', async (event) => {
-  if (event.target.id !== 'my-template' && event.target.id !== 'my-rate') return;
+  if (event.target.id !== 'my-template') return;
   try {
-    let message;
-    if (event.target.id === 'my-rate') {
-      const rate = await api.setRate(event.target.value);
-      message = rate > 0 ? `Hourly rate saved. Invoices you create from now on use ${Fmt.money(rate)} an hour.` : 'Hourly rate cleared.';
-    } else {
-      await api.chooseTemplate(event.target.value || null);
-      message = 'Template changed. Invoices you create from now on use it.';
-    }
-    ui.preview = null; // its lines and amount may follow the old rate or template
-    state = await api.getState(); // the rate is also shown on Profile
+    await api.chooseTemplate(event.target.value || null);
+    ui.preview = null; // its lines may follow the old template's detail
     await drawView();
-    toast(message);
+    toast('Template changed. Invoices you create from now on use it.');
   } catch (err) {
     toast(err.message, { error: true });
   }
@@ -1016,6 +1009,9 @@ const FORMS = {
 
   async profile(v) {
     await api.saveProfile(v);
+    ui.preview = null; // its amount may follow the old rate
+    state = await api.getState(); // the rate shown under the heading
+    await drawView();
     toast('Details saved.');
   },
 

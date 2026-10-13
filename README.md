@@ -12,7 +12,7 @@ There is no separate sign-in: KeepTime uses whoever is signed in to [AB Apps](ht
 1. Set up AB Apps, and add everyone there. Then make a folder in OneDrive or SharePoint, for example `KeepTime`. Share it with every manager and contractor, with edit access.
 2. Everyone syncs it to their computer. For a OneDrive folder shared with you, use **Add shortcut to My files**; for a SharePoint library, use **Sync**. Then right-click the folder and choose **Always keep on this device**.
 3. Install and open the app. Choose the synced folder.
-4. A manager opens the empty folder first and sets it up. Then they add tasks (Shared › Tasks) and check the invoice template's bill-to address (Shared › Invoice templates). Contractors set their own hourly rates on My invoices, or a manager can on Manage › People. A contractor can log time before their rate is set, but can't create invoices until it is.
+4. A manager opens the empty folder first and sets it up. Then they add tasks (Shared › Tasks) and check the invoice template's bill-to address (Shared › Invoice templates). Contractors set their own hourly rates on their Profile, or a manager can on Manage › People. A contractor can log time before their rate is set, but can't create invoices until it is.
 
 Each computer chooses the folder only once.
 

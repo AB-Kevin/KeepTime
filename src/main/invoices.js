@@ -135,7 +135,7 @@ function issue({ entries, invoices, person, profile, template, from, to, now }) 
     return { errors: ['Choose the first and last day of the period.'] };
   }
   if (to < from) return { errors: ['The end of the period must be on or after the start.'] };
-  if (!(person.hourlyRate > 0)) return { errors: ["Your hourly rate hasn't been set. Set it on My invoices before invoicing."] };
+  if (!(person.hourlyRate > 0)) return { errors: ["Your hourly rate hasn't been set. Set it on your Profile before invoicing."] };
   if (!template) return { errors: ['No invoice template is set up yet. Ask a manager to add one.'] };
 
   const p = preview(entries, from, to, person.hourlyRate, template.detail);

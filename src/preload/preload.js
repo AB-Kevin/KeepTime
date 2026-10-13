@@ -37,7 +37,6 @@ contextBridge.exposeInMainWorld('api', {
   issueInvoice: (from, to) => call('invoices:issue', { from, to }),
   voidInvoice: (id, reason) => call('invoices:void', { id, reason }),
   chooseTemplate: (id) => call('invoices:template', id),
-  setRate: (rate) => call('invoices:rate', rate),
   invoiceOutput: (personId, id, action) => call('invoice:output', { personId, id, action }),
   openFile: (filePath) => call('open:file', filePath),
 
