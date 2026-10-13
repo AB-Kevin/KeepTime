@@ -99,6 +99,9 @@ function people() {
   return manage.mergePeople(abApps.readDirectory(identity.dataDir), store.people());
 }
 
+/** A person with the rate and template their invoices use, which they may have set themselves. */
+const withChoices = (person) => manage.withOwnChoices(person, store.profile(person.id));
+
 function me() {
   if (!store || !session) throw new UserError('Sign in first.');
   const person = people().find((p) => p.id === session.personId);
@@ -106,7 +109,7 @@ function me() {
     signOut();
     throw new UserError('Your account has been turned off in AB Apps. Ask a manager if that is a mistake.');
   }
-  return person;
+  return withChoices(person);
 }
 
 /**
@@ -157,6 +160,13 @@ function asContractor() {
 function asManager() {
   const person = me();
   if (!person.manager) throw new UserError('Only managers can do that.');
+  return person;
+}
+
+/** Managers, and anyone who logs time: those who can change the tasks and invoice templates. */
+function asEditor() {
+  const person = me();
+  if (!person.manager && !person.contractor) throw new UserError('Only managers and people who log time can do that.');
   return person;
 }
 
@@ -442,7 +452,10 @@ function entriesBetween(entries, from, to) {
     .sort((a, b) => b.start.localeCompare(a.start));
 }
 
-/** The template a person's invoices use: theirs if set and still there, else the default, else the first. */
+/**
+ * The template a person's invoices use: the one chosen for them if it's still
+ * there, else the default, else the first. `person` is from withChoices.
+ */
 function templateFor(person) {
   const templates = store.templates();
   const { defaultTemplateId } = store.settings();
@@ -452,6 +465,12 @@ function templateFor(person) {
     templates[0] ??
     null
   );
+}
+
+/** The templates someone's invoices can use, with which is the default. */
+function templateChoices() {
+  const { defaultTemplateId } = store.settings();
+  return store.templates().map(({ id, name }) => ({ id, name, isDefault: id === defaultTemplateId }));
 }
 
 function findInvoice(personId, id) {
@@ -643,14 +662,32 @@ function registerHandlers() {
       invoices: list,
       suggested: { from: first ? Fmt.dayKey(first) : Fmt.dayKey(new Date()), to: Fmt.dayKey(new Date()) },
       template: templateFor(person)?.name ?? null,
+      templateId: person.templateId,
+      templates: templateChoices(),
       rate: person.hourlyRate,
     };
+  });
+
+  // The rate and template people set themselves are kept in their own
+  // profile.json, since only managers write shared/people.json.
+  handle('invoices:template', (id) => {
+    const person = asContractor();
+    if (id && !store.templates().some((t) => t.id === id)) throw new UserError("That template doesn't exist any more.");
+    store.saveProfile(person.id, { ...store.profile(person.id), templateId: id || null, templateChosenAt: new Date().toISOString() });
+  });
+
+  handle('invoices:rate', (value) => {
+    const person = asContractor();
+    const rate = manage.parseRate(value);
+    if (rate == null) throw new UserError(manage.RATE_PROBLEM);
+    store.saveProfile(person.id, { ...store.profile(person.id), hourlyRate: rate, rateChosenAt: new Date().toISOString() });
+    return rate;
   });
 
   handle('invoices:preview', ({ from, to }) => {
     const person = asContractor();
     const template = templateFor(person);
-    if (!template) throw new UserError('No invoice template is set up yet. Ask a manager to add one.');
+    if (!template) throw new UserError('No invoice template is set up yet. Add one on the Invoice templates page.');
     const p = invoices.preview(store.entries(person.id), from, to, person.hourlyRate, template.detail);
     return { lines: p.lines, hours: p.hours, rate: p.rate, amount: p.amount, count: p.entries.length };
   });
@@ -714,69 +751,51 @@ function registerHandlers() {
     shell.openPath(filePath);
   });
 
-  // Manager ---------------------------------------------------------------------------
+  // Tasks and invoice templates: managers and anyone who logs time ---------------------
+  // Saves re-read the file and change only the record being saved, as managers' do.
 
-  handle('mgr:overview', () => {
-    asManager();
-    return overview();
-  });
-
-  handle('mgr:people', () => {
-    asManager();
-    const settings = store.settings();
-    return {
-      people: people()
-        .filter((p) => p.active || p.contractor)
-        .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name)),
-      templates: store.templates().map(({ id, name }) => ({ id, name, isDefault: id === settings.defaultTemplateId })),
-    };
-  });
-
-  handle('mgr:person:save', (input) => {
-    asManager();
-    const records = store.people();
-    fail(manage.saveContractor(records, people(), input, new Date()));
-    store.savePeople(records);
-  });
-
-  handle('mgr:tasks:save', (input) => {
-    asManager();
+  handle('tasks:save', (input) => {
+    asEditor();
     const tasks = store.tasks();
     fail(manage.saveTask(tasks, input));
     store.saveTasks(tasks);
     return tasks;
   });
 
-  handle('mgr:tasks:move', ({ id, direction }) => {
-    asManager();
+  handle('tasks:move', ({ id, direction }) => {
+    asEditor();
     const tasks = store.tasks();
     manage.moveTask(tasks, id, direction);
     store.saveTasks(tasks);
     return tasks;
   });
 
-  handle('mgr:templates', () => {
-    asManager();
+  handle('templates:list', () => {
+    const person = asEditor();
     const settings = store.settings();
-    const users = people().filter((p) => p.active && p.contractor);
+    const users = people().filter((p) => p.active && p.contractor).map(withChoices);
     return {
-      templates: store.templates().map((t) => ({
-        ...t,
-        isDefault: t.id === settings.defaultTemplateId,
-        users: users.filter((p) => p.templateId === t.id).map((p) => p.name),
-      })),
+      templates: store.templates().map((t) => {
+        const isDefault = t.id === settings.defaultTemplateId;
+        return { ...t, isDefault, locked: isDefault && !person.manager, users: users.filter((u) => u.templateId === t.id).map((u) => u.name) };
+      }),
       detailOptions: invoices.DETAIL,
     };
   });
 
-  handle('mgr:template:new', () => {
-    asManager();
+  handle('template:new', () => {
+    asEditor();
     return invoices.newTemplate({ name: '' });
   });
 
-  handle('mgr:template:save', (input) => {
-    asManager();
+  handle('template:save', (input) => {
+    const person = asEditor();
     const templates = store.templates();
+    const settings = store.settings();
+    // Everyone uses the default unless they choose another, so changing it changes everyone's invoices.
+    if (input.id && input.id === settings.defaultTemplateId && !person.manager) {
+      throw new UserError('Only managers can change the default template. To change your own invoices, make a copy and choose it on My invoices.');
+    }
     const fields = ['name', 'title', 'prefix', 'billToName', 'billToAddress', 'detail', 'paymentTerms', 'notes', 'footer'];
     const clean = Object.fromEntries(fields.map((f) => [f, String(input[f] ?? '').trim()]));
     clean.prefix = clean.prefix.toUpperCase();
@@ -786,9 +805,45 @@ function registerHandlers() {
     if (existing) Object.assign(existing, template);
     else templates.push(template);
     store.saveTemplates(templates);
-    const settings = store.settings();
-    if (!settings.defaultTemplateId) store.saveSettings({ ...settings, defaultTemplateId: template.id });
+    if (!settings.defaultTemplateId && person.manager) store.saveSettings({ ...settings, defaultTemplateId: template.id });
     return template;
+  });
+
+  handle('template:delete', (id) => {
+    asEditor();
+    if (store.settings().defaultTemplateId === id) throw new UserError("The default template can't be deleted. A manager can make another one the default first.");
+    const users = people().filter((p) => p.active && p.contractor).map(withChoices).filter((p) => p.templateId === id);
+    if (users.length) {
+      throw new UserError(
+        `${users.map((p) => p.name).join(', ')} ${users.length === 1 ? 'uses' : 'use'} this template. ` +
+          'Each person can choose another on My invoices, or a manager can on the People page.',
+      );
+    }
+    store.saveTemplates(store.templates().filter((t) => t.id !== id));
+  });
+
+  // Issued invoices keep their own copy of the template, so these previews are the only HTML built from unsaved input.
+  handle('template:preview', (input) => {
+    asEditor();
+    return renderInvoice(invoices.sampleInvoice({ ...invoices.newTemplate(), ...input }), fontCss());
+  });
+
+  // Manager ---------------------------------------------------------------------------
+
+  handle('mgr:overview', () => {
+    asManager();
+    return overview();
+  });
+
+  handle('mgr:people', () => {
+    asManager();
+    return {
+      people: people()
+        .filter((p) => p.active || p.contractor)
+        .map((p) => (p.contractor ? withChoices(p) : p))
+        .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name)),
+      templates: templateChoices(),
+    };
   });
 
   handle('mgr:template:default', (id) => {
@@ -797,20 +852,11 @@ function registerHandlers() {
     store.saveSettings({ ...store.settings(), defaultTemplateId: id });
   });
 
-  handle('mgr:template:delete', (id) => {
+  handle('mgr:person:save', (input) => {
     asManager();
-    if (store.settings().defaultTemplateId === id) throw new UserError("The default template can't be deleted. Make another one the default first.");
-    const users = people().filter((p) => p.active && p.contractor && p.templateId === id);
-    if (users.length) {
-      throw new UserError(`${users.map((p) => p.name).join(', ')} ${users.length === 1 ? 'uses' : 'use'} this template. Change that on the People page first.`);
-    }
-    store.saveTemplates(store.templates().filter((t) => t.id !== id));
-  });
-
-  // Issued invoices keep their own copy of the template, so these previews are the only HTML built from unsaved input.
-  handle('mgr:template:preview', (input) => {
-    asManager();
-    return renderInvoice(invoices.sampleInvoice({ ...invoices.newTemplate(), ...input }), fontCss());
+    const records = store.people();
+    fail(manage.saveContractor(records, people(), input, new Date()));
+    store.savePeople(records);
   });
 
   handle('mgr:settings:save', (input) => {

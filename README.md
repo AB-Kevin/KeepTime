@@ -2,8 +2,8 @@
 
 A Windows desktop app for remote contractors to log time and create invoices. Its data is kept in a shared OneDrive folder. It used to be called Contractor Time.
 
-- **Contractors** start and stop a timer, choose a task from a list or describe the work in their own words, and correct their own time. They create invoices from their completed time and print them or save them as PDFs.
-- **Managers** see who's signed in and whose timer is running. They set hourly rates, the task list and invoice templates, and they can view, print or save any contractor's invoice.
+- **Contractors** start and stop a timer, choose a task from a list or describe the work in their own words, and correct their own time. They set their own hourly rate and choose their invoice template, create invoices from their completed time, and print them or save them as PDFs. They can also add and change tasks and invoice templates, which everyone shares, except the default template.
+- **Managers** see who's signed in and whose timer is running. They can also set anyone's hourly rate and invoice template. Only managers change the default template, which new contractors use. They can view, print or save any contractor's invoice.
 
 There is no separate sign-in: KeepTime uses whoever is signed in to [AB Apps](https://github.com/AB-Kevin/ab-apps), and follows along when someone signs in or out there. People are added, renamed and turned off in AB Apps. Managers in AB Apps are managers here; employees and contractors log time. A manager can also set a manager to log time, or an employee not to.
 
@@ -12,7 +12,7 @@ There is no separate sign-in: KeepTime uses whoever is signed in to [AB Apps](ht
 1. Set up AB Apps, and add everyone there. Then make a folder in OneDrive or SharePoint, for example `KeepTime`. Share it with every manager and contractor, with edit access.
 2. Everyone syncs it to their computer. For a OneDrive folder shared with you, use **Add shortcut to My files**; for a SharePoint library, use **Sync**. Then right-click the folder and choose **Always keep on this device**.
 3. Install and open the app. Choose the synced folder.
-4. A manager opens the empty folder first and sets it up. Then they set hourly rates (Manage › People), add tasks (Manage › Tasks), and check the invoice template's bill-to address (Manage › Invoice templates). A contractor can log time before their rate is set, but can't create invoices until it is.
+4. A manager opens the empty folder first and sets it up. Then they add tasks (Shared › Tasks) and check the invoice template's bill-to address (Shared › Invoice templates). Contractors set their own hourly rates on My invoices, or a manager can on Manage › People. A contractor can log time before their rate is set, but can't create invoices until it is.
 
 Each computer chooses the folder only once.
 
@@ -22,23 +22,23 @@ Before version 0.2, this app kept its own people and PINs. To move them to AB Ap
 
 ## How the data is stored
 
-OneDrive can't merge two computers' changes to one file. When that happens it keeps both copies, as `entries-LAPTOP.json`. To avoid that, every file has exactly one kind of writer:
+OneDrive can't merge two computers' changes to one file. When that happens it keeps both copies, as `entries-LAPTOP.json`. To avoid that, each person's own files are written only by them, and a save to a shared file changes only one record:
 
 | File | Written by |
 | --- | --- |
-| `shared/people.json` | managers: for each person (by their AB Apps id), whether they log time, their hourly rate, invoice template and invoice number |
-| `shared/tasks.json` | managers |
-| `shared/templates.json` | managers |
+| `shared/people.json` | managers: for each person (by their AB Apps id), whether they log time, the hourly rate and invoice template a manager set for them, and their invoice number |
+| `shared/tasks.json` | managers and anyone who logs time |
+| `shared/templates.json` | managers and anyone who logs time; only managers change the default template |
 | `shared/settings.json` | managers |
 | `people/<id>/entries.json` | that person: their time, with a history of edits |
 | `people/<id>/invoices.json` | that person: each invoice with a copy of everything printed on it |
-| `people/<id>/profile.json` | that person: their invoice details |
+| `people/<id>/profile.json` | that person: their invoice details, and the hourly rate and invoice template they set for themselves (if a manager also set one, the later change is used) |
 | `people/<id>/presence.json` | that person's app, every minute while signed in |
 
 Related rules:
 
 - A person can be signed in on only one computer at a time.
-- A manager's save re-reads the shared file and changes only the record being saved.
+- A save to a shared file re-reads it and changes only the record being saved. Two people saving the same shared file within OneDrive's sync time can still leave a conflict copy. That's more likely for tasks and templates, since anyone who logs time can change them.
 - If OneDrive does keep a conflict copy, **Who's signed in** lists it so someone can sort it out.
 - Issued invoices keep their own copy of the template, rate and contractor details, so they print the same later.
 

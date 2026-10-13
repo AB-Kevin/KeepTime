@@ -41,10 +41,40 @@ test('managers set whether someone logs time, their rate and template; the first
 
   // Saving again keeps the number.
   manage.saveContractor(records, people, { id: ids.ben, contractor: false, hourlyRate: '30' }, NOW);
-  assert.deepEqual(records.find((r) => r.id === ids.ben), { id: ids.ben, number: 1, created: NOW.toISOString(), name: 'Ben Yoder', contractor: false, hourlyRate: 30, templateId: null });
+  assert.deepEqual(records.find((r) => r.id === ids.ben), { id: ids.ben, number: 1, created: NOW.toISOString(), name: 'Ben Yoder', contractor: false, hourlyRate: 30, templateId: null, rateSetAt: NOW.toISOString(), templateSetAt: NOW.toISOString() });
 
   assert.match(manage.saveContractor(records, people, { id: ids.ben, hourlyRate: '-1' }, NOW)[0], /hourly rate/);
   assert.match(manage.saveContractor(records, people, { id: 'nobody', hourlyRate: '1' }, NOW)[0], /isn't in AB Apps/);
+});
+
+test("a person's rate and invoice template are whichever they or a manager set last", () => {
+  const records = [];
+  const later = new Date(NOW.getTime() + 60000);
+  const ben = () => manage.mergePeople(directory, records).find((p) => p.id === ids.ben);
+  assert.equal(manage.withOwnChoices(ben(), {}).templateId, null, 'no one has chosen: the default');
+
+  // Set before managers' choices were dated: the person's own choice wins.
+  records.push({ id: ids.ben, number: 1, templateId: 't1' });
+  assert.equal(manage.withOwnChoices(ben(), {}).templateId, 't1');
+  assert.equal(manage.withOwnChoices(ben(), { templateId: 't2', templateChosenAt: NOW.toISOString() }).templateId, 't2');
+
+  // A manager choosing afterward wins until the person chooses again; saving without changing it doesn't.
+  manage.saveContractor(records, manage.mergePeople(directory, records), { id: ids.ben, contractor: true, templateId: 't3' }, later);
+  assert.equal(manage.withOwnChoices(ben(), { templateId: 't2', templateChosenAt: NOW.toISOString() }).templateId, 't3');
+  manage.saveContractor(records, manage.mergePeople(directory, records), { id: ids.ben, contractor: true, templateId: 't3' }, new Date(later.getTime() + 60000));
+  assert.equal(ben().templateSetAt, later.toISOString());
+  assert.equal(manage.withOwnChoices(ben(), { templateId: null, templateChosenAt: new Date(later.getTime() + 1000).toISOString() }).templateId, null, 'back to the default');
+
+  // The rate works the same way, separately from the template.
+  const own = { hourlyRate: 40, rateChosenAt: NOW.toISOString() };
+  assert.equal(manage.withOwnChoices(ben(), {}).hourlyRate, 0, 'no rate set yet');
+  assert.equal(manage.withOwnChoices(ben(), own).hourlyRate, 40, "the person's own rate, since no manager has set one");
+  manage.saveContractor(records, manage.mergePeople(directory, records), { id: ids.ben, contractor: true, hourlyRate: '35', templateId: 't3' }, later);
+  assert.equal(manage.withOwnChoices(ben(), own).hourlyRate, 35, 'a manager set it afterward');
+  assert.equal(manage.withOwnChoices(ben(), { ...own, rateChosenAt: new Date(later.getTime() + 1000).toISOString() }).hourlyRate, 40, 'then the person again');
+  assert.equal(manage.withOwnChoices(ben(), own).templateId, 't3', "the rate doesn't change the template");
+
+  assert.deepEqual(['', '32.505', '-1', 'abc', '20000'].map(manage.parseRate), [0, 32.51, null, null, null]);
 });
 
 test('records from before AB Apps lose their own name, role, status and PIN fields when saved', () => {

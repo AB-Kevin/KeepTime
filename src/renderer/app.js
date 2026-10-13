@@ -140,7 +140,7 @@ function setupScreen() {
   return html`<div class="center"><div class="panel">
     <img class="logo" src="assets/logo-primary-lockup.jpg" alt="Anabaptist Brotherhood">
     <h1>Set up KeepTime</h1>
-    <p class="lead">Nothing is in this folder yet. Set it up, then give contractors their hourly rates on the People page. Everyone
+    <p class="lead">Nothing is in this folder yet. Set it up, then add tasks and check the invoice template. Contractors set their own hourly rates, or you can on the People page. Everyone
       signed in to AB Apps can use it.</p>
     <p class="path">${state.dataDir}</p>
     <div class="notice">If your organization already uses KeepTime, don't set it up again. Choose the folder that's been shared with you instead.</div>
@@ -186,15 +186,15 @@ const NAV = [
       ['all-invoices', 'Invoices'],
       ['team-time', 'Team time'],
       ['people', 'People'],
-      ['tasks', 'Tasks'],
-      ['templates', 'Invoice templates'],
       ['settings', 'Settings'],
     ],
   },
+  // Managers and anyone who logs time change these; everyone uses them.
+  { label: 'Shared', role: ['manager', 'contractor'], items: [['tasks', 'Tasks'], ['templates', 'Invoice templates']] },
   { label: 'Account', role: null, items: [['profile', 'Profile']] },
 ];
 
-const allowedGroups = () => NAV.filter((g) => !g.role || state.me[g.role]);
+const allowedGroups = () => NAV.filter((g) => !g.role || [g.role].flat().some((role) => state.me[role]));
 const allowed = (name) => allowedGroups().some((g) => g.items.some(([key]) => key === name));
 const defaultView = () => (state.me.contractor ? 'timer' : 'overview');
 
@@ -425,6 +425,7 @@ async function invoicesView() {
   ui.invoiceTo ??= data.suggested.to;
   const p = ui.preview;
   const noRate = !(data.rate > 0);
+  const def = data.templates.find((t) => t.isDefault);
 
   const preview = p
     ? html`<div class="section">
@@ -448,7 +449,18 @@ async function invoicesView() {
   return html`<div class="page">
     <div class="page-head"><div><h1>My invoices</h1>
       <p class="sub">Invoices use the ${data.template ? `"${data.template}"` : 'default'} template${data.rate > 0 ? ` and your rate of ${Fmt.money(data.rate)} an hour` : ''}.</p></div></div>
-    ${noRate ? html`<div class="notice warn">Your hourly rate hasn't been set, so you can't create invoices yet. Ask a manager to set it.</div>` : ''}
+    ${noRate ? html`<div class="notice warn">Your hourly rate hasn't been set, so you can't create invoices yet. Enter it below.</div>` : ''}
+    <div class="field-row" style="max-width: 640px">
+      <div class="field"><label for="my-rate">Hourly rate ($)</label>
+        <input type="number" id="my-rate" min="0" step="0.01" value="${data.rate || ''}">
+        <span class="hint">For invoices you create from now on.</span></div>
+      <div class="field"><label for="my-template">Invoice template</label>
+        <select id="my-template">
+          <option value="">Default${def ? ` (${def.name})` : ''}</option>
+          ${data.templates.filter((t) => !t.isDefault).map((t) => html`<option value="${t.id}"${flag(t.id === data.templateId, 'selected')}>${t.name}</option>`)}</select>
+        <span class="hint">Templates are changed on the
+          <button class="link" data-action="nav" data-view="templates">Invoice templates</button> page.</span></div>
+    </div>
     <h2>New invoice</h2>
     <p class="small muted" style="margin-top: 4px">Choose the period to bill. Only completed time that isn't already on an invoice is included.</p>
     ${periodFilter('invoice-preview', ui.invoiceFrom, ui.invoiceTo, { button: 'Preview' })}
@@ -608,7 +620,7 @@ async function teamTimeView() {
   </div>`;
 }
 
-// Manager: people and tasks ---------------------------------------------------------------------
+// Manager: people. Shared: tasks -------------------------------------------------------------------
 
 async function peopleView() {
   const data = await api.people();
@@ -647,7 +659,8 @@ function personDialog(person) {
         <option value="">Default${def ? ` (${def.name})` : ''}</option>
         ${templates.map((t) => html`<option value="${t.id}"${flag(t.id === person.templateId, 'selected')}>${t.name}</option>`)}</select></div>
     </div>
-    <p class="small muted">Their name, and whether they're a manager or can sign in, are changed in AB Apps.</p>
+    <p class="small muted">They can also set their own rate and template on My invoices; whichever was changed more recently is used.
+    Their name, and whether they're a manager or can sign in, are changed in AB Apps.</p>
     <div class="dialog-actions">
       <button class="btn btn-primary" type="submit">Save</button>
       <button class="btn btn-ghost" type="button" data-action="close-dialog">Cancel</button>
@@ -658,7 +671,8 @@ async function tasksView() {
   state = await api.getState();
   const tasks = state.tasks;
   return html`<div class="page narrow">
-    <div class="page-head"><div><h1>Tasks</h1><p class="sub">The list contractors choose from when they log time. They can also type their own description.</p></div>
+    <div class="page-head"><div><h1>Tasks</h1><p class="sub">The list everyone chooses from when they log time. They can also type their own description.
+      Managers and anyone who logs time can add and change tasks, and the changes apply to everyone.</p></div>
       <button class="btn btn-primary" data-action="add-task">Add task</button></div>
     ${tasks.length
       ? html`<div class="table-wrap"><table class="data">
@@ -674,7 +688,7 @@ async function tasksView() {
                 <button class="btn btn-ghost btn-sm" data-action="edit-task" data-id="${t.id}">Change</button></div></td></tr>`,
           )}</tbody></table></div>
         <p class="caption" style="margin-top: 12px">Retiring a task takes it off the list. Time already logged against it keeps its name.</p>`
-      : html`<div class="empty">No tasks yet. Until you add some, contractors describe their work in their own words.</div>`}
+      : html`<div class="empty">No tasks yet. Until someone adds some, everyone describes their work in their own words.</div>`}
   </div>`;
 }
 
@@ -692,7 +706,7 @@ function taskDialog(task) {
     </div></form>`);
 }
 
-// Manager: invoice templates ----------------------------------------------------------------------
+// Shared: invoice templates --------------------------------------------------------------------
 
 async function templatesView() {
   const data = await api.templates();
@@ -701,15 +715,20 @@ async function templatesView() {
     const first = data.templates.find((t) => t.isDefault) ?? data.templates[0];
     ui.templateDraft = first ? { ...first, saved: true } : { ...(await api.newTemplate()), saved: false };
   }
+  // Who uses it and whether it's the default can change while it's open, and a save doesn't return them.
+  const fresh = ui.templateDraft.saved && data.templates.find((x) => x.id === ui.templateDraft.id);
+  if (fresh) ui.templateDraft = { ...ui.templateDraft, users: fresh.users, isDefault: fresh.isDefault, locked: fresh.locked };
   const t = ui.templateDraft;
+  const off = flag(t.locked, 'disabled');
   const field = (name, label, { area = false, hint = '', max = 200 } = {}) =>
     html`<div class="field"><label for="tp-${name}">${label}</label>${area
-      ? html`<textarea id="tp-${name}" name="${name}" maxlength="${max}">${t[name] ?? ''}</textarea>`
-      : html`<input type="text" id="tp-${name}" name="${name}" maxlength="${max}" value="${t[name] ?? ''}">`}${hint ? html`<span class="hint">${hint}</span>` : ''}</div>`;
+      ? html`<textarea id="tp-${name}" name="${name}" maxlength="${max}"${off}>${t[name] ?? ''}</textarea>`
+      : html`<input type="text" id="tp-${name}" name="${name}" maxlength="${max}" value="${t[name] ?? ''}"${off}>`}${hint ? html`<span class="hint">${hint}</span>` : ''}</div>`;
 
   return html`<div class="page" style="max-width: 1500px">
     <div class="page-head"><div><h1>Invoice templates</h1>
-      <p class="sub">What invoices say and how much detail they show. Changes apply to invoices created afterward; issued invoices keep the template they were made with.</p></div></div>
+      <p class="sub">What invoices say and how much detail they show. Everyone can use and change these templates, except the default,
+        which only managers change. Changes apply to invoices created afterward; issued invoices keep the template they were made with.</p></div></div>
     <div class="template-layout">
       <div>
         <ul class="template-list">${data.templates.map(
@@ -722,21 +741,30 @@ async function templatesView() {
       <form data-form="template" id="template-form">
         <input type="hidden" name="id" value="${t.id}">
         <div class="form-error"></div>
-        ${field('name', 'Template name', { hint: 'Only managers see this.', max: 80 })}
+        ${t.locked
+          ? html`<div class="notice">This is the default template, which everyone uses unless they choose another, so only managers can change it.
+              To change your own invoices, make a copy, change it, then choose it on My invoices.</div>`
+          : t.isDefault
+            ? html`<div class="notice">This is the default template: everyone who hasn't chosen another uses it, so changes here apply to all their invoices.</div>`
+            : t.saved && t.users.length > 1
+              ? html`<div class="notice">${t.users.join(', ')} use this template, so changes here apply to all their invoices.</div>`
+              : ''}
+        ${field('name', 'Template name', { hint: 'Shown in the list of templates, not on invoices.', max: 80 })}
         <div class="field-row">
           ${field('title', 'Heading', { hint: 'Such as "Invoice" or "Statement of hours".', max: 60 })}
           ${field('prefix', 'Number prefix', { hint: 'Invoice numbers look like INV-007-0012.', max: 10 })}
         </div>
         ${field('billToName', 'Bill to')}
         ${field('billToAddress', 'Bill-to address', { area: true, max: 500 })}
-        <div class="field"><label for="tp-detail">Line items</label><select id="tp-detail" name="detail">
+        <div class="field"><label for="tp-detail">Line items</label><select id="tp-detail" name="detail"${off}>
           ${Object.entries(data.detailOptions).map(([v, l]) => html`<option value="${v}"${flag(v === t.detail, 'selected')}>${l}</option>`)}</select></div>
         ${field('paymentTerms', 'Payment terms', { area: true, max: 500 })}
         ${field('notes', 'Notes', { area: true, max: 1000, hint: 'Printed on every invoice that uses this template.' })}
         ${field('footer', 'Footer', { area: true, max: 500, hint: 'Small print at the bottom, such as a tax ID or contact line.' })}
         <div class="actions">
-          <button class="btn btn-primary" type="submit">Save template</button>
-          ${t.saved && !t.isDefault ? html`<button class="btn btn-secondary" type="button" data-action="default-template" data-id="${t.id}">Make default</button>` : ''}
+          ${t.locked ? '' : html`<button class="btn btn-primary" type="submit">Save template</button>`}
+          ${t.saved ? html`<button class="btn btn-secondary" type="button" data-action="copy-template">Make a copy</button>` : ''}
+          ${t.saved && !t.isDefault && state.me.manager ? html`<button class="btn btn-secondary" type="button" data-action="default-template" data-id="${t.id}">Make default</button>` : ''}
           ${t.saved && !t.isDefault ? html`<button class="btn btn-danger" type="button" data-action="delete-template" data-id="${t.id}">Delete</button>` : ''}
           ${t.saved ? '' : html`<button class="btn btn-ghost" type="button" data-action="discard-template">Discard</button>`}
         </div>
@@ -758,7 +786,8 @@ function templateValues() {
 }
 
 async function updatePreview() {
-  const values = templateValues();
+  // A locked template's fields are disabled, so the form doesn't hold them.
+  const values = ui.templateDraft.locked ? ui.templateDraft : templateValues();
   if (!values) return;
   ui.templateDraft = { ...ui.templateDraft, ...values };
   try {
@@ -792,6 +821,27 @@ document.addEventListener('change', async (event) => {
   if (event.target.name !== 'theme' || event.target.type !== 'radio') return;
   try {
     state.theme = await api.setTheme(event.target.value);
+  } catch (err) {
+    toast(err.message, { error: true });
+  }
+});
+
+// The rate and template someone's own invoices use, set on My invoices.
+document.addEventListener('change', async (event) => {
+  if (event.target.id !== 'my-template' && event.target.id !== 'my-rate') return;
+  try {
+    let message;
+    if (event.target.id === 'my-rate') {
+      const rate = await api.setRate(event.target.value);
+      message = rate > 0 ? `Hourly rate saved. Invoices you create from now on use ${Fmt.money(rate)} an hour.` : 'Hourly rate cleared.';
+    } else {
+      await api.chooseTemplate(event.target.value || null);
+      message = 'Template changed. Invoices you create from now on use it.';
+    }
+    ui.preview = null; // its lines and amount may follow the old rate or template
+    state = await api.getState(); // the rate is also shown on Profile
+    await drawView();
+    toast(message);
   } catch (err) {
     toast(err.message, { error: true });
   }
@@ -923,7 +973,7 @@ const FORMS = {
     state = await api.setup({ contractor: v.contractor });
     view = null;
     render();
-    toast('KeepTime is set up. Next, set hourly rates on the People page, add tasks, and check the invoice template.');
+    toast('KeepTime is set up. Next, add tasks and check the invoice template. Contractors set their own hourly rates, or you can on the People page.');
   },
 
   async timer(v) {
@@ -993,9 +1043,16 @@ const FORMS = {
   },
 
   async template(v) {
+    const isNew = !ui.templateDraft.saved;
     const saved = await api.saveTemplate(v);
     ui.templateDraft = { ...saved, saved: true };
-    await after('Template saved.');
+    await after();
+    const use = async () => {
+      await api.chooseTemplate(saved.id);
+      if (view === 'templates') await drawView();
+      toast(`Your invoices use "${saved.name}" from now on.`);
+    };
+    toast('Template saved.', isNew && state.me.contractor ? { action: { label: 'Use for my invoices', run: use } } : {});
   },
 
   async settings(v) {
@@ -1155,6 +1212,15 @@ const ACTIONS = {
   },
   async 'new-template'() {
     ui.templateDraft = { ...(await api.newTemplate()), saved: false };
+    await drawView();
+  },
+  async 'copy-template'() {
+    const draft = ui.templateDraft;
+    const { users, isDefault, locked, ...fields } = { ...draft, ...(draft.locked ? {} : templateValues()) };
+    const taken = new Set(ui.templateData.templates.map((x) => x.name.trim().toLowerCase()));
+    let name = `${fields.name} (copy)`;
+    for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${fields.name} (copy ${n})`;
+    ui.templateDraft = { ...fields, id: (await api.newTemplate()).id, name: name.slice(0, 80), saved: false };
     await drawView();
   },
   async 'discard-template'() {

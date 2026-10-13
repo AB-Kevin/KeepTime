@@ -8,8 +8,8 @@
 //
 // The file exists only while someone is signed in. `dataDir` is the shared AB
 // Apps folder, whose shared/people.json lists everyone: their names, classes
-// (manager, employee or contractor) and whether they can sign in. Contractor
-// Time reads that list rather than keeping its own, and keeps only what's
+// (manager, employee or contractor) and whether they can sign in. KeepTime
+// reads that list rather than keeping its own, and keeps only what's
 // particular to it (hourly rates, templates, invoice numbers) in its own
 // folder, under the same person ids.
 //

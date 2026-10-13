@@ -1,7 +1,8 @@
 'use strict';
 
-// Rules for what managers keep in the shared folder: what KeepTime
-// needs to know about people, tasks and settings. Each save function changes
+// Rules for what's kept in the shared folder: what KeepTime needs to know
+// about people, tasks and settings. Managers set people and settings; anyone
+// who logs time can change tasks too. Each save function changes
 // the list it's given and returns problems to show; an empty list means the
 // caller should save.
 //
@@ -27,6 +28,8 @@ function mergePeople(directory, records) {
     contractor: typeof r?.contractor === 'boolean' ? r.contractor : fallbackLogsTime,
     hourlyRate: r?.hourlyRate ?? 0,
     templateId: r?.templateId ?? null,
+    rateSetAt: r?.rateSetAt ?? null,
+    templateSetAt: r?.templateSetAt ?? null,
     number: r?.number ?? null,
   });
   const people = directory.map((d) => ({
@@ -48,8 +51,8 @@ function mergePeople(directory, records) {
 function saveContractor(records, people, input, now) {
   const person = people.find((p) => p.id === input.id);
   if (!person || person.removed) return ["That person isn't in AB Apps any more."];
-  const rate = input.hourlyRate === '' || input.hourlyRate == null ? 0 : Number(input.hourlyRate);
-  if (!Number.isFinite(rate) || rate < 0 || rate > 10000) return ['Enter the hourly rate in dollars, such as 25 or 32.50.'];
+  const rate = parseRate(input.hourlyRate);
+  if (rate == null) return [RATE_PROBLEM];
 
   let record = records.find((r) => r.id === person.id);
   if (!record) {
@@ -64,13 +67,42 @@ function saveContractor(records, people, input, now) {
   delete record.pin;
   delete record.manager;
   delete record.active;
+  const templateId = input.templateId || null;
+  // When, so a rate or template the person sets for themselves afterward wins (see withOwnChoices).
+  if (rate !== (record.hourlyRate ?? 0)) record.rateSetAt = now.toISOString();
+  if (templateId !== (record.templateId ?? null)) record.templateSetAt = now.toISOString();
   Object.assign(record, {
     name: person.name, // shown if they're ever removed from AB Apps
     contractor: Boolean(input.contractor),
-    hourlyRate: Math.round(rate * 100) / 100,
-    templateId: input.templateId || null,
+    hourlyRate: rate,
+    templateId,
   });
   return [];
+}
+
+const RATE_PROBLEM = 'Enter the hourly rate in dollars, such as 25 or 32.50.';
+
+/** An hourly rate as typed, rounded to the cent; blank is 0. Null if it isn't one. */
+function parseRate(value) {
+  const rate = value === '' || value == null ? 0 : Number(value);
+  return Number.isFinite(rate) && rate >= 0 && rate <= 10000 ? Math.round(rate * 100) / 100 : null;
+}
+
+/** The person's own choice if they made it at `ownAt` and a manager hasn't chosen since, else the manager's. */
+const later = (managerValue, managerAt, ownValue, ownAt) => (ownAt && !(managerAt > ownAt) ? ownValue : managerValue);
+
+/**
+ * A person with the hourly rate and invoice template their invoices use. A
+ * manager sets these in shared/people.json and the person in their own
+ * profile.json, so neither writes the other's file; whichever chose more
+ * recently wins. templateId null means the default template.
+ */
+function withOwnChoices(person, profile) {
+  return {
+    ...person,
+    hourlyRate: later(person.hourlyRate, person.rateSetAt, profile?.hourlyRate ?? 0, profile?.rateChosenAt),
+    templateId: later(person.templateId ?? null, person.templateSetAt, profile?.templateId ?? null, profile?.templateChosenAt),
+  };
 }
 
 function saveTask(list, input) {
@@ -108,4 +140,4 @@ function settingsProblems(input) {
   return errors;
 }
 
-module.exports = { mergePeople, saveContractor, saveTask, moveTask, settingsProblems };
+module.exports = { mergePeople, saveContractor, parseRate, RATE_PROBLEM, withOwnChoices, saveTask, moveTask, settingsProblems };

@@ -4,15 +4,19 @@
 // OneDrive can't merge two computers' changes to the same file, so every file
 // has exactly one kind of writer:
 //
-//   shared/people.json       managers: names, roles, rates, PINs they set
-//   shared/tasks.json        managers: the "what were you working on" list
-//   shared/templates.json    managers: invoice templates
+//   shared/people.json       managers: who logs time, rates, templates they set
+//   shared/tasks.json        managers and anyone who logs time: the "what were
+//                            you working on" list
+//   shared/templates.json    managers and anyone who logs time: invoice
+//                            templates (only managers change the default)
 //   shared/settings.json     managers: policies and the default template
 //   people/<id>/*.json       only that person, signed in on one computer at a
-//                            time: their time, invoices, profile and presence
+//                            time: their time, invoices, profile (including
+//                            the rate and template they set) and presence
 //
-// Managers' saves re-read the file and change only the record being saved, so
-// two managers editing different people a minute apart don't undo each other.
+// Saves to shared files re-read the file and change only the record being
+// saved, so two people editing different records a minute apart don't undo
+// each other.
 
 const fs = require('fs');
 const path = require('path');
