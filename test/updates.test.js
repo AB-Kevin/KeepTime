@@ -8,7 +8,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { parseVersion, isNewer, parseLatestYml, checkForUpdate, downloadInstaller } = require('../src/main/updates');
 
-const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'contractor-time-update-'));
+const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'keeptime-update-'));
 const sha512 = (bytes) => crypto.createHash('sha512').update(bytes).digest('base64');
 const DIGEST = sha512('installer');
 
@@ -24,7 +24,7 @@ function fakeFetch(body, { status = 200 } = {}) {
 }
 
 /** A latest.yml as electron-builder writes it. */
-function latestYml(version, { name = `ContractorTime-Setup-${version}.exe`, digest = DIGEST, size = 1234 } = {}) {
+function latestYml(version, { name = `KeepTime-Setup-${version}.exe`, digest = DIGEST, size = 1234 } = {}) {
   return [
     `version: ${version}`,
     'files:',
@@ -52,8 +52,8 @@ test('versions are compared part by part, as numbers', () => {
 test('latest.yml is read without a YAML library', () => {
   assert.deepEqual(parseLatestYml(latestYml('1.2.0').replaceAll('\n', '\r\n')), {
     version: '1.2.0',
-    files: [{ url: 'ContractorTime-Setup-1.2.0.exe', sha512: DIGEST, size: 1234 }],
-    path: 'ContractorTime-Setup-1.2.0.exe',
+    files: [{ url: 'KeepTime-Setup-1.2.0.exe', sha512: DIGEST, size: 1234 }],
+    path: 'KeepTime-Setup-1.2.0.exe',
     sha512: DIGEST,
     releaseDate: '2026-10-06T02:30:27.123Z',
   });
@@ -68,9 +68,9 @@ test('a newer release is reported with its installer and digest', async () => {
   assert.equal(result.publishedAt, '2026-10-06T02:30:27.123Z');
   assert.equal(result.pageUrl, 'https://github.com/AB-Kevin/contractor-time/releases/tag/v1.2.0');
   assert.deepEqual(result.installer, {
-    name: 'ContractorTime-Setup-1.2.0.exe',
+    name: 'KeepTime-Setup-1.2.0.exe',
     size: 1234,
-    url: 'https://github.com/AB-Kevin/contractor-time/releases/download/v1.2.0/ContractorTime-Setup-1.2.0.exe',
+    url: 'https://github.com/AB-Kevin/contractor-time/releases/download/v1.2.0/KeepTime-Setup-1.2.0.exe',
     sha512: DIGEST,
   });
 
@@ -82,7 +82,7 @@ test('only this version\'s installer, with a digest and size, is offered', async
   const wrongName = await checkForUpdate('1.0.0', fakeFetch(latestYml('1.2.0', { name: 'Something-else.exe' })));
   assert.equal(wrongName.installer, null);
 
-  const elsewhere = await checkForUpdate('1.0.0', fakeFetch(latestYml('1.2.0', { name: 'https://example.com/ContractorTime-Setup-1.2.0.exe' })));
+  const elsewhere = await checkForUpdate('1.0.0', fakeFetch(latestYml('1.2.0', { name: 'https://example.com/KeepTime-Setup-1.2.0.exe' })));
   assert.equal(elsewhere.installer, null);
 
   const noDigest = await checkForUpdate('1.0.0', fakeFetch(latestYml('1.2.0', { digest: '' })));
@@ -104,7 +104,7 @@ test('problems reaching GitHub are explained', async () => {
 test('the installer is downloaded, checked against its digest, and reused', async () => {
   const dir = tempDir();
   const bytes = crypto.randomBytes(200000).toString('base64');
-  const installer = { name: 'ContractorTime-Setup-1.2.0.exe', size: bytes.length, url: 'https://x', sha512: sha512(bytes) };
+  const installer = { name: 'KeepTime-Setup-1.2.0.exe', size: bytes.length, url: 'https://x', sha512: sha512(bytes) };
   const fetch = fakeFetch(bytes);
   const progress = [];
 
@@ -120,7 +120,7 @@ test('the installer is downloaded, checked against its digest, and reused', asyn
 
 test('a download that doesn\'t match the release is thrown away', async () => {
   const dir = tempDir();
-  const installer = { name: 'ContractorTime-Setup-1.2.0.exe', size: 5, url: 'https://x', sha512: sha512('right') };
+  const installer = { name: 'KeepTime-Setup-1.2.0.exe', size: 5, url: 'https://x', sha512: sha512('right') };
   await assert.rejects(downloadInstaller(installer, dir, fakeFetch('wrong')), /didn't match/);
   await assert.rejects(downloadInstaller({ ...installer, size: 99 }, dir, fakeFetch('right')), /didn't match/);
   await assert.rejects(downloadInstaller(installer, dir, fakeFetch('', { status: 500 })), /couldn't be downloaded/);

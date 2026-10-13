@@ -17,6 +17,8 @@ const manage = require('./manage');
 const Fmt = require('../shared/format');
 const { RELEASES_PAGE, checkForUpdate, downloadInstaller } = require('./updates');
 
+// Kept from when this app was called Contractor Time: Windows and AB Apps know
+// the installed copy by it, so changing it would install a second copy.
 const APP_ID = 'org.anabaptistbrotherhood.contractortime';
 const APP_ICON = path.join(__dirname, '..', '..', 'build', 'icon.png');
 // The window's color before the page paints: --surface-page in styles.css.
@@ -25,7 +27,7 @@ const THEMES = ['system', 'light', 'dark'];
 const FONT_DIR = path.join(__dirname, '..', '..', 'node_modules', '@fontsource', 'poppins', 'files');
 
 // Lets a test run keep its settings apart from this computer's real ones.
-if (process.env.CONTRACTOR_TIME_PROFILE) app.setPath('userData', process.env.CONTRACTOR_TIME_PROFILE);
+if (process.env.KEEPTIME_PROFILE) app.setPath('userData', process.env.KEEPTIME_PROFILE);
 
 // One copy per Windows account; on a shared remote desktop server each person has their own.
 const isPrimaryInstance = app.requestSingleInstanceLock();
@@ -41,7 +43,7 @@ const savedFiles = new Set(); // PDFs saved this session, which the window may a
 let latestRelease = null; // from the last update check; updates are only downloaded from it
 let installing = null;
 
-const updatesDir = () => path.join(app.getPath('temp'), 'Contractor Time updates');
+const updatesDir = () => path.join(app.getPath('temp'), 'KeepTime updates');
 
 /** A problem to show the person as-is, rather than as a failure. */
 class UserError extends Error {}
@@ -53,6 +55,19 @@ const fail = (errors) => {
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
 const loadConfig = () => readJson(configPath(), {});
 const saveConfig = (changes) => writeJson(configPath(), { ...loadConfig(), ...changes });
+
+// Before it was renamed KeepTime, this app kept its settings in a folder named
+// Contractor Time. Bringing them over saves choosing the data folder again.
+function moveOldSettings() {
+  const oldConfig = path.join(app.getPath('appData'), 'Contractor Time', 'config.json');
+  if (process.env.KEEPTIME_PROFILE || fs.existsSync(configPath()) || !fs.existsSync(oldConfig)) return;
+  try {
+    fs.mkdirSync(app.getPath('userData'), { recursive: true });
+    fs.copyFileSync(oldConfig, configPath());
+  } catch {
+    // Without them, the data folder is chosen again.
+  }
+}
 
 function openStore() {
   const { dataDir } = loadConfig();
@@ -70,11 +85,11 @@ function applyTheme() {
 
 function suggestedFolder() {
   const oneDrive = process.env.OneDriveCommercial || process.env.OneDrive;
-  return oneDrive ? path.join(oneDrive, 'Contractor Time') : null;
+  return oneDrive ? path.join(oneDrive, 'KeepTime') : null;
 }
 
 // Session -------------------------------------------------------------------
-// Whoever is signed in to AB Apps is signed in here. Contractor Time follows
+// Whoever is signed in to AB Apps is signed in here. KeepTime follows
 // identity.json as it changes, so signing out of AB Apps, or someone else
 // signing in there, signs out here too.
 
@@ -96,7 +111,7 @@ function me() {
 
 /**
  * Starts a session for the person AB Apps has signed in, if there is one and
- * they may use Contractor Time on this computer. Returns why not, or null.
+ * they may use KeepTime on this computer. Returns why not, or null.
  */
 function startSession() {
   if (session) return null;
@@ -115,7 +130,7 @@ function startSession() {
     const minutes = presence.minutesUntilStale(elsewhere);
     return {
       reason: 'elsewhere',
-      message: `You're using Contractor Time on ${elsewhere.computer}. Close it there first. If that computer is off or asleep, you can use it here in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+      message: `You're using KeepTime on ${elsewhere.computer}. Close it there first. If that computer is off or asleep, you can use it here in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
     };
   }
   session = { personId: person.id, name: person.name, signedInAt: new Date().toISOString() };
@@ -177,7 +192,7 @@ function createWindow() {
     height: 860,
     minWidth: 900,
     minHeight: 600,
-    title: 'Contractor Time',
+    title: 'KeepTime',
     icon: APP_ICON,
     backgroundColor: windowBackground(),
     webPreferences: {
@@ -215,7 +230,7 @@ function confirmClose(event) {
   dialog
     .showMessageBox(win, {
       type: 'question',
-      title: 'Contractor Time',
+      title: 'KeepTime',
       message: 'Your timer is still running.',
       detail: described
         ? `It started at ${Fmt.time(entry.start)}. If you leave it running, it keeps counting until you stop it.`
@@ -232,7 +247,7 @@ function confirmClose(event) {
         const entries = store.entries(session.personId);
         const errors = time.updateTimer(entries, store.tasks(), { taskId: entry.taskId, note: entry.note }, new Date(), { stop: true });
         if (errors.length) {
-          dialog.showErrorBox('Contractor Time', errors.join(' '));
+          dialog.showErrorBox('KeepTime', errors.join(' '));
           return;
         }
         store.saveEntries(session.personId, entries);
@@ -265,7 +280,7 @@ async function invoicePage(invoice, show) {
   });
   page.webContents.on('will-navigate', (event) => event.preventDefault());
   // A file, not a data: URL, so the page may load the bundled fonts.
-  const file = path.join(app.getPath('temp'), `contractor-time-${crypto.randomUUID()}.html`);
+  const file = path.join(app.getPath('temp'), `keeptime-${crypto.randomUUID()}.html`);
   fs.writeFileSync(file, renderInvoice(invoice, fontCss()));
   try {
     await page.loadFile(file);
@@ -352,8 +367,8 @@ async function installUpdate() {
   const { response } = await dialog.showMessageBox(win, {
     type: 'question',
     title: 'Install update?',
-    message: `Install Contractor Time ${release.version} now?`,
-    detail: 'Contractor Time closes while the update installs. Your time and invoices are kept.'
+    message: `Install KeepTime ${release.version} now?`,
+    detail: 'KeepTime closes while the update installs. Your time and invoices are kept.'
       + (timerRunning ? '\n\nYour timer keeps running while the update installs.' : ''),
     buttons: ['Install now', 'Later'],
     defaultId: 0,
@@ -451,7 +466,7 @@ function overview() {
   const week = startOfWeek();
   const tomorrow = startOfToday();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  // Everyone in AB Apps is listed there; here, only those who have used Contractor Time or been set up in it.
+  // Everyone in AB Apps is listed there; here, only those who have used KeepTime or been set up in it.
   const rows = people()
     .filter((p) => p.active)
     .map((p) => ({ p, seen: store.presence(p.id) }))
@@ -514,7 +529,7 @@ function registerHandlers() {
   handle('folder:choose', async () => {
     const suggested = suggestedFolder();
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
-      title: 'Choose the Contractor Time data folder',
+      title: 'Choose the KeepTime data folder',
       defaultPath: store?.dataDir ?? (suggested && fs.existsSync(path.dirname(suggested)) ? path.dirname(suggested) : undefined),
       properties: ['openDirectory', 'createDirectory'],
     });
@@ -556,7 +571,7 @@ function registerHandlers() {
 
   handle('setup:create', ({ contractor }) => {
     if (!store || store.isDataFolder()) throw new UserError('This folder is already set up.');
-    if (identity?.class !== 'manager') throw new UserError('Only a manager in AB Apps can set up Contractor Time.');
+    if (identity?.class !== 'manager') throw new UserError('Only a manager in AB Apps can set up KeepTime.');
     const records = [];
     // A manager logs time only if they say so; everyone else does without being set up here.
     if (contractor) fail(manage.saveContractor(records, people(), { id: identity.personId, contractor: true, hourlyRate: 0 }, new Date()));
@@ -853,6 +868,7 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([{ role: 'fileMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }]),
   );
+  moveOldSettings();
   applyTheme();
   nativeTheme.on('updated', () => win?.setBackgroundColor(windowBackground()));
   try {

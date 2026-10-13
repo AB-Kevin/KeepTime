@@ -1,6 +1,6 @@
 {
-  "name": "contractor-time-desktop",
-  "productName": "Contractor Time",
+  "name": "keeptime-desktop",
+  "productName": "KeepTime",
   "version": "0.1.1",
   "description": "Time tracking and invoicing for remote contractors, kept in a shared OneDrive folder.",
   "author": "Anabaptist Brotherhood",
@@ -22,7 +22,7 @@
   },
   "build": {
     "appId": "org.anabaptistbrotherhood.contractortime",
-    "productName": "Contractor Time",
+    "productName": "KeepTime",
     "files": [
       "src/**/*",
       "build/icon.png",
@@ -41,7 +41,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "ContractorTime-Setup-${version}.${ext}"
+      "artifactName": "KeepTime-Setup-${version}.${ext}"
     }
   }
 }

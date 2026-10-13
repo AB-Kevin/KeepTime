@@ -15,7 +15,7 @@ const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
 const LATEST_YML_URL = `${RELEASES_PAGE}/latest/download/latest.yml`;
 
 /** The installer's name, as set by package.json "build.nsis.artifactName". */
-const installerName = (version) => `ContractorTime-Setup-${version}.exe`;
+const installerName = (version) => `KeepTime-Setup-${version}.exe`;
 
 /** Splits "1.2.3" or "v1.2.3" into [1, 2, 3], or returns null. */
 function parseVersion(text) {

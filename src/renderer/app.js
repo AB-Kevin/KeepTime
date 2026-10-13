@@ -113,8 +113,8 @@ function folderScreen() {
     : '';
   return html`<div class="center"><div class="panel">
     <img class="logo" src="assets/logo-primary-lockup.jpg" alt="Anabaptist Brotherhood">
-    <h1>Contractor Time</h1>
-    <p class="lead">Choose the OneDrive folder that holds Contractor Time's data. Everyone uses the same shared folder, so it has to be
+    <h1>KeepTime</h1>
+    <p class="lead">Choose the OneDrive folder that holds KeepTime's data. Everyone uses the same shared folder, so it has to be
       synced to this computer first.</p>
     ${missing}
     ${state.suggested ? html`<p class="caption">On this computer, OneDrive is at <span class="path">${state.suggested.replace(/[\\/][^\\/]+$/, '')}</span>.</p>` : ''}
@@ -129,8 +129,8 @@ function setupScreen() {
   if (!state.canSetUp) {
     return html`<div class="center"><div class="panel">
       <img class="logo" src="assets/logo-primary-lockup.jpg" alt="Anabaptist Brotherhood">
-      <h1>Contractor Time isn't set up yet</h1>
-      <p class="lead">Nothing is in this folder yet. A manager sets up Contractor Time the first time; ask one to, or check that this is the
+      <h1>KeepTime isn't set up yet</h1>
+      <p class="lead">Nothing is in this folder yet. A manager sets up KeepTime the first time; ask one to, or check that this is the
         folder that's been shared with you.</p>
       <p class="path">${state.dataDir}</p>
       <div class="actions"><button class="btn btn-secondary" data-action="reload">Try again</button></div>
@@ -139,11 +139,11 @@ function setupScreen() {
   }
   return html`<div class="center"><div class="panel">
     <img class="logo" src="assets/logo-primary-lockup.jpg" alt="Anabaptist Brotherhood">
-    <h1>Set up Contractor Time</h1>
+    <h1>Set up KeepTime</h1>
     <p class="lead">Nothing is in this folder yet. Set it up, then give contractors their hourly rates on the People page. Everyone
       signed in to AB Apps can use it.</p>
     <p class="path">${state.dataDir}</p>
-    <div class="notice">If your organization already uses Contractor Time, don't set it up again. Choose the folder that's been shared with you instead.</div>
+    <div class="notice">If your organization already uses KeepTime, don't set it up again. Choose the folder that's been shared with you instead.</div>
     <form data-form="setup">
       <div class="form-error"></div>
       <label class="check"><input type="checkbox" name="contractor"> I also log my own time</label>
@@ -153,10 +153,10 @@ function setupScreen() {
   </div></div>`;
 }
 
-// Contractor Time has no sign-in of its own: it uses whoever is signed in to AB Apps.
+// KeepTime has no sign-in of its own: it uses whoever is signed in to AB Apps.
 function abAppsScreen() {
   const reasons = {
-    'signed-out': ['Sign in to AB Apps', 'Contractor Time uses your AB Apps sign-in. Open AB Apps and sign in, and this window continues on its own.'],
+    'signed-out': ['Sign in to AB Apps', 'KeepTime uses your AB Apps sign-in. Open AB Apps and sign in, and this window continues on its own.'],
     unknown: ['Not found in AB Apps', `${state.name} is signed in to AB Apps, but isn't in its list of people yet. If OneDrive is still syncing, wait a minute; otherwise ask a manager.`],
     'turned-off': ['Turned off in AB Apps', `${state.name}'s account is turned off in AB Apps. Ask a manager if that is a mistake.`],
     unreadable: ["The AB Apps folder can't be read", state.message],
@@ -201,7 +201,7 @@ const defaultView = () => (state.me.contractor ? 'timer' : 'overview');
 function drawShell() {
   root.innerHTML = html`
     <header class="app-header">
-      <div class="brand"><img class="logo" src="assets/logo-primary-lockup.jpg" alt="Anabaptist Brotherhood"><span class="app-name">Contractor Time</span></div>
+      <div class="brand"><img class="logo" src="assets/logo-primary-lockup.jpg" alt="Anabaptist Brotherhood"><span class="app-name">KeepTime</span></div>
       <div class="who"><span id="update-badge"></span><span>Signed in as <strong>${state.me.name}</strong></span>
         </div>
     </header>
@@ -498,7 +498,7 @@ async function profileView() {
         </form>`
       : ''}
     <div class="section"><h2>Signing in</h2>
-      <p class="small muted" style="margin-top: 4px">Contractor Time uses your AB Apps sign-in. Your name, and whether you're a manager,
+      <p class="small muted" style="margin-top: 4px">KeepTime uses your AB Apps sign-in. Your name, and whether you're a manager,
         come from AB Apps; to sign out, sign out there.</p>
     </div>
     ${me.manager ? '' : [appearanceSection(), updatesSection()]}
@@ -812,7 +812,7 @@ function updatesSection() {
     ${release?.newer
       ? html`<div class="notice" style="margin-bottom: 12px"><strong>Version ${release.version} is available.</strong>
           ${release.publishedAt ? `Released ${Fmt.date(release.publishedAt)}. ` : ''}${release.hasInstaller
-            ? 'Contractor Time closes while the update installs. Your time and invoices are kept.'
+            ? 'KeepTime closes while the update installs. Your time and invoices are kept.'
             : "Its installer isn't ready yet. Try again in a few minutes."}</div>`
       : ''}
     <div class="actions">
@@ -867,7 +867,7 @@ async function settingsView() {
       <button class="btn btn-primary" type="submit">Save settings</button>
     </form>
     <div class="section"><h2>Data folder</h2>
-      <p class="small muted" style="margin-top: 4px">Where this computer finds Contractor Time's data. Each computer chooses it once.</p>
+      <p class="small muted" style="margin-top: 4px">Where this computer finds KeepTime's data. Each computer chooses it once.</p>
       <p class="path">${state.dataDir}</p>
       <div class="actions"><button class="btn btn-secondary" data-action="open-folder">Open folder</button>
         <button class="btn btn-ghost" data-action="change-folder">Use a different folder on this computer</button></div>
@@ -923,7 +923,7 @@ const FORMS = {
     state = await api.setup({ contractor: v.contractor });
     view = null;
     render();
-    toast('Contractor Time is set up. Next, set hourly rates on the People page, add tasks, and check the invoice template.');
+    toast('KeepTime is set up. Next, set hourly rates on the People page, add tasks, and check the invoice template.');
   },
 
   async timer(v) {

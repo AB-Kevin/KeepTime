@@ -1,12 +1,12 @@
 'use strict';
 
-// Rules for what managers keep in the shared folder: what Contractor Time
+// Rules for what managers keep in the shared folder: what KeepTime
 // needs to know about people, tasks and settings. Each save function changes
 // the list it's given and returns problems to show; an empty list means the
 // caller should save.
 //
 // Names, classes and who can sign in come from AB Apps (see abapps.js).
-// shared/people.json here keeps only what's particular to Contractor Time,
+// shared/people.json here keeps only what's particular to KeepTime,
 // one record per person id: whether they log time, their hourly rate,
 // invoice template and the number in their invoice numbers.
 
@@ -15,7 +15,7 @@ const crypto = require('crypto');
 const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /**
- * Everyone Contractor Time knows: the people in AB Apps with what managers set
+ * Everyone KeepTime knows: the people in AB Apps with what managers set
  * here. Managers are managers here too. Employees and contractors log time
  * unless a manager says otherwise; managers don't unless a manager says they
  * do. Someone removed from AB Apps who has a record here is kept, turned off,
@@ -44,7 +44,7 @@ function mergePeople(directory, records) {
   return people;
 }
 
-/** Sets what Contractor Time needs for one person: whether they log time, their rate and template. */
+/** Sets what KeepTime needs for one person: whether they log time, their rate and template. */
 function saveContractor(records, people, input, now) {
   const person = people.find((p) => p.id === input.id);
   if (!person || person.removed) return ["That person isn't in AB Apps any more."];

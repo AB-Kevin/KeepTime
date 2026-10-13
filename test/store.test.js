@@ -9,7 +9,7 @@ const { Store } = require('../src/main/store');
 const presence = require('../src/main/presence');
 
 function tempStore() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'contractor-time-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'keeptime-'));
   return new Store(dir);
 }
 

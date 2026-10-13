@@ -1,24 +1,24 @@
-# Contractor Time (desktop)
+# KeepTime (desktop)
 
-A Windows desktop app for remote contractors to log time and create invoices. Its data is kept in a shared OneDrive folder.
+A Windows desktop app for remote contractors to log time and create invoices. Its data is kept in a shared OneDrive folder. It used to be called Contractor Time.
 
 - **Contractors** start and stop a timer, choose a task from a list or describe the work in their own words, and correct their own time. They create invoices from their completed time and print them or save them as PDFs.
 - **Managers** see who's signed in and whose timer is running. They set hourly rates, the task list and invoice templates, and they can view, print or save any contractor's invoice.
 
-There is no separate sign-in: Contractor Time uses whoever is signed in to [AB Apps](https://github.com/AB-Kevin/ab-apps), and follows along when someone signs in or out there. People are added, renamed and turned off in AB Apps. Managers in AB Apps are managers here; employees and contractors log time. A manager can also set a manager to log time, or an employee not to.
+There is no separate sign-in: KeepTime uses whoever is signed in to [AB Apps](https://github.com/AB-Kevin/ab-apps), and follows along when someone signs in or out there. People are added, renamed and turned off in AB Apps. Managers in AB Apps are managers here; employees and contractors log time. A manager can also set a manager to log time, or an employee not to.
 
 ## Setting it up
 
-1. Set up AB Apps, and add everyone there. Then make a folder in OneDrive or SharePoint, for example `Contractor Time`. Share it with every manager and contractor, with edit access.
+1. Set up AB Apps, and add everyone there. Then make a folder in OneDrive or SharePoint, for example `KeepTime`. Share it with every manager and contractor, with edit access.
 2. Everyone syncs it to their computer. For a OneDrive folder shared with you, use **Add shortcut to My files**; for a SharePoint library, use **Sync**. Then right-click the folder and choose **Always keep on this device**.
 3. Install and open the app. Choose the synced folder.
 4. A manager opens the empty folder first and sets it up. Then they set hourly rates (Manage › People), add tasks (Manage › Tasks), and check the invoice template's bill-to address (Manage › Invoice templates). A contractor can log time before their rate is set, but can't create invoices until it is.
 
 Each computer chooses the folder only once.
 
-### Moving from Contractor Time's own sign-in
+### Moving from the old sign-in
 
-Before version 0.2, Contractor Time kept its own people and PINs. To move them to AB Apps, a manager chooses **Import from Contractor Time** on AB Apps' People page and picks this folder. Everyone keeps their id, so their time and invoices stay theirs, and their PIN. Someone already in AB Apps under the same name (often the manager who set it up) is linked to their Contractor Time records instead of being added twice. Rates, templates and invoice numbers stay in this folder.
+Before version 0.2, this app kept its own people and PINs. To move them to AB Apps, a manager chooses **Import from Contractor Time** on AB Apps' People page and picks this folder. Everyone keeps their id, so their time and invoices stay theirs, and their PIN. Someone already in AB Apps under the same name (often the manager who set it up) is linked to their KeepTime records instead of being added twice. Rates, templates and invoice numbers stay in this folder.
 
 ## How the data is stored
 
@@ -59,7 +59,7 @@ npm test       # unit tests for the time, invoice, people and storage rules
 npm run dist   # build the Windows installer into dist/
 ```
 
-Set `CONTRACTOR_TIME_PROFILE` to a folder to run with settings kept apart from this computer's real ones, and `AB_APPS_PROFILE` to the folder holding a test `identity.json` (AB Apps uses the same variable for its own settings, so running both with it set ties them together).
+Set `KEEPTIME_PROFILE` to a folder to run with settings kept apart from this computer's real ones, and `AB_APPS_PROFILE` to the folder holding a test `identity.json` (AB Apps uses the same variable for its own settings, so running both with it set ties them together).
 
 ### Releasing
 
@@ -70,7 +70,7 @@ npm version patch       # or minor / major: runs the tests, bumps the version, c
 git push --follow-tags  # or run `git config push.followTags true` once, then plain `git push`
 ```
 
-The release appears on the repository's **Releases** page a few minutes later as `ContractorTime-Setup-X.Y.Z.exe`, with a `latest.yml` beside it and notes listing the changes since the previous release. Follow the build under the **Actions** tab. The build stops without publishing if the tag doesn't match the version in package.json or a test fails.
+The release appears on the repository's **Releases** page a few minutes later as `KeepTime-Setup-X.Y.Z.exe`, with a `latest.yml` beside it and notes listing the changes since the previous release. Follow the build under the **Actions** tab. The build stops without publishing if the tag doesn't match the version in package.json or a test fails.
 
 - `latest.yml` lists the installer's version, size and SHA-512 digest. electron-builder writes it because package.json's `build.publish` names this repository. Keep the tag as `vX.Y.Z` and leave `artifactName` as it is.
 - The app reads `latest.yml` from the latest release (`src/main/updates.js`) when it opens and when someone chooses **Check for updates** (Settings for managers, Profile for everyone else). A waiting update shows as **Update available** in the header. **Download and install** checks the installer against the digest, asks, then closes the app and installs over it, keeping the install folder and shortcuts. It uses the release's download link, not the GitHub API, so many computers on one network can check without hitting GitHub's limit. AB Apps reads the same file. Downloads and installs only run in the installed app, not under `npm start`.
