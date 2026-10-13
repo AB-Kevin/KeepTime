@@ -3,18 +3,22 @@
 A Windows desktop app for remote contractors to log time and create invoices. Its data is kept in a shared OneDrive folder.
 
 - **Contractors** start and stop a timer, choose a task from a list or describe the work in their own words, and correct their own time. They create invoices from their completed time and print them or save them as PDFs.
-- **Managers** see who's signed in and whose timer is running. They manage people, hourly rates, PINs, the task list and invoice templates, and they can view, print or save any contractor's invoice.
+- **Managers** see who's signed in and whose timer is running. They set hourly rates, the task list and invoice templates, and they can view, print or save any contractor's invoice.
 
-Sign-in is a name picked from a list plus a 4–8 digit PIN.
+There is no separate sign-in: Contractor Time uses whoever is signed in to [AB Apps](https://github.com/AB-Kevin/ab-apps), and follows along when someone signs in or out there. People are added, renamed and turned off in AB Apps. Managers in AB Apps are managers here; employees and contractors log time. A manager can also set a manager to log time, or an employee not to.
 
 ## Setting it up
 
-1. Make a folder in OneDrive or SharePoint, for example `Contractor Time`. Share it with every manager and contractor, with edit access.
+1. Set up AB Apps, and add everyone there. Then make a folder in OneDrive or SharePoint, for example `Contractor Time`. Share it with every manager and contractor, with edit access.
 2. Everyone syncs it to their computer. For a OneDrive folder shared with you, use **Add shortcut to My files**; for a SharePoint library, use **Sync**. Then right-click the folder and choose **Always keep on this device**.
 3. Install and open the app. Choose the synced folder.
-4. The first person to open an empty folder sets it up and becomes the first manager. Then they add people (Manage › People), tasks (Manage › Tasks), and check the invoice template's bill-to address (Manage › Invoice templates).
+4. A manager opens the empty folder first and sets it up. Then they set hourly rates (Manage › People), add tasks (Manage › Tasks), and check the invoice template's bill-to address (Manage › Invoice templates). A contractor can log time before their rate is set, but can't create invoices until it is.
 
-Each computer chooses the folder only once. People added on one computer can sign in elsewhere after OneDrive has synced, usually within a minute.
+Each computer chooses the folder only once.
+
+### Moving from Contractor Time's own sign-in
+
+Before version 0.2, Contractor Time kept its own people and PINs. To move them to AB Apps, a manager chooses **Import from Contractor Time** on AB Apps' People page and picks this folder. Everyone keeps their id, so their time and invoices stay theirs, and their PIN. Someone already in AB Apps under the same name (often the manager who set it up) is linked to their Contractor Time records instead of being added twice. Rates, templates and invoice numbers stay in this folder.
 
 ## How the data is stored
 
@@ -22,13 +26,13 @@ OneDrive can't merge two computers' changes to one file. When that happens it ke
 
 | File | Written by |
 | --- | --- |
-| `shared/people.json` | managers: names, roles, rates, PINs they set |
+| `shared/people.json` | managers: for each person (by their AB Apps id), whether they log time, their hourly rate, invoice template and invoice number |
 | `shared/tasks.json` | managers |
 | `shared/templates.json` | managers |
 | `shared/settings.json` | managers |
 | `people/<id>/entries.json` | that person: their time, with a history of edits |
 | `people/<id>/invoices.json` | that person: each invoice with a copy of everything printed on it |
-| `people/<id>/profile.json` | that person: their invoice details and any PIN they chose |
+| `people/<id>/profile.json` | that person: their invoice details |
 | `people/<id>/presence.json` | that person's app, every minute while signed in |
 
 Related rules:
@@ -42,7 +46,7 @@ Because each person's files are written only by that person, managers can see co
 
 ## Limits worth knowing
 
-- **The PIN is not security.** Anyone with access to the OneDrive folder can open and change the files directly. The PIN keeps people out of each other's time in the app, nothing more. If that isn't acceptable, the data needs a server, as in the ASP.NET version in `../timetrack`.
+- **Signing in is not security.** Anyone with access to the OneDrive folders can open and change the files directly, and anyone using a Windows account can change who AB Apps says is signed in. Sign-in keeps people out of each other's time in the app, nothing more. If that isn't acceptable, the data needs a server, as in the ASP.NET version in `../timetrack`.
 - **"Who's signed in" lags by OneDrive's sync time**, usually under a minute or two. Someone whose computer went to sleep counts as signed out three minutes later.
 - **Times are shown in each computer's own time zone.**
 
@@ -51,11 +55,11 @@ Because each person's files are written only by that person, managers can see co
 ```
 npm install
 npm start      # run the app
-npm test       # unit tests for the time, invoice, PIN and storage rules
+npm test       # unit tests for the time, invoice, people and storage rules
 npm run dist   # build the Windows installer into dist/
 ```
 
-Set `CONTRACTOR_TIME_PROFILE` to a folder to run with settings kept apart from this computer's real ones.
+Set `CONTRACTOR_TIME_PROFILE` to a folder to run with settings kept apart from this computer's real ones, and `AB_APPS_PROFILE` to the folder holding a test `identity.json` (AB Apps uses the same variable for its own settings, so running both with it set ties them together).
 
 ### Releasing
 
@@ -79,7 +83,8 @@ The release appears on the repository's **Releases** page a few minutes later as
 | `src/main/invoices.js` | invoice lines, totals, numbering, voiding, templates |
 | `src/main/invoice-html.js` | the printed invoice (also used for PDFs and the template preview) |
 | `src/main/store.js` | data folder layout and file access |
-| `src/main/auth.js`, `manage.js`, `presence.js` | PINs and lockout; people, task and settings rules; who's signed in |
+| `src/main/abapps.js` | reading who is signed in to AB Apps, and its list of people |
+| `src/main/manage.js`, `presence.js` | people, task and settings rules; who's signed in |
 | `src/main/updates.js` | checking GitHub for a newer release and downloading its installer |
 | `.github/workflows/release.yml` | builds and publishes a release when a version tag is pushed |
 | `src/renderer/` | the window: `app.js` and `styles.css` (Anabaptist Brotherhood brand tokens, light and dark) |

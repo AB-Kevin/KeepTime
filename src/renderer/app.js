@@ -126,20 +126,26 @@ function folderScreen() {
 }
 
 function setupScreen() {
+  if (!state.canSetUp) {
+    return html`<div class="center"><div class="panel">
+      <img class="logo" src="assets/logo-primary-lockup.jpg" alt="Anabaptist Brotherhood">
+      <h1>Contractor Time isn't set up yet</h1>
+      <p class="lead">Nothing is in this folder yet. A manager sets up Contractor Time the first time; ask one to, or check that this is the
+        folder that's been shared with you.</p>
+      <p class="path">${state.dataDir}</p>
+      <div class="actions"><button class="btn btn-secondary" data-action="reload">Try again</button></div>
+      <div class="panel-foot"><button class="link small" data-action="choose-folder">Choose a different folder</button></div>
+    </div></div>`;
+  }
   return html`<div class="center"><div class="panel">
     <img class="logo" src="assets/logo-primary-lockup.jpg" alt="Anabaptist Brotherhood">
     <h1>Set up Contractor Time</h1>
-    <p class="lead">Nothing is in this folder yet. Add yourself as the first manager; you can add everyone else afterward.</p>
+    <p class="lead">Nothing is in this folder yet. Set it up, then give contractors their hourly rates on the People page. Everyone
+      signed in to AB Apps can use it.</p>
     <p class="path">${state.dataDir}</p>
     <div class="notice">If your organization already uses Contractor Time, don't set it up again. Choose the folder that's been shared with you instead.</div>
     <form data-form="setup">
       <div class="form-error"></div>
-      <div class="field"><label for="s-name">Your name</label><input type="text" id="s-name" name="name" maxlength="80" required></div>
-      <div class="field-row">
-        <div class="field"><label for="s-pin">PIN</label><input type="password" id="s-pin" name="pin" inputmode="numeric" maxlength="8" required>
-          <span class="hint">4 to 8 digits.</span></div>
-        <div class="field"><label for="s-pin2">PIN again</label><input type="password" id="s-pin2" name="pin2" inputmode="numeric" maxlength="8" required></div>
-      </div>
       <label class="check"><input type="checkbox" name="contractor"> I also log my own time</label>
       <button class="btn btn-primary" type="submit">Set up</button>
     </form>
@@ -147,27 +153,23 @@ function setupScreen() {
   </div></div>`;
 }
 
-function loginScreen() {
-  const people = state.people;
+// Contractor Time has no sign-in of its own: it uses whoever is signed in to AB Apps.
+function abAppsScreen() {
+  const reasons = {
+    'signed-out': ['Sign in to AB Apps', 'Contractor Time uses your AB Apps sign-in. Open AB Apps and sign in, and this window continues on its own.'],
+    unknown: ['Not found in AB Apps', `${state.name} is signed in to AB Apps, but isn't in its list of people yet. If OneDrive is still syncing, wait a minute; otherwise ask a manager.`],
+    'turned-off': ['Turned off in AB Apps', `${state.name}'s account is turned off in AB Apps. Ask a manager if that is a mistake.`],
+    unreadable: ["The AB Apps folder can't be read", state.message],
+    elsewhere: ['Open on another computer', state.message],
+  };
+  const [title, lead] = reasons[state.reason] ?? reasons['signed-out'];
   return html`<div class="center"><div class="panel">
     <img class="logo" src="assets/logo-primary-lockup.jpg" alt="Anabaptist Brotherhood">
-    <h1>Sign in</h1>
-    <p class="lead">Contractor Time</p>
-    <form data-form="login">
-      <div class="form-error"></div>
-      <div class="field"><label for="l-person">Name</label>
-        <select id="l-person" name="personId" required>
-          <option value="">Choose your name</option>
-          ${people.map((p) => html`<option value="${p.id}"${flag(p.id === state.lastPersonId, 'selected')}>${p.name}</option>`)}
-        </select></div>
-      <div class="field"><label for="l-pin">PIN</label>
-        <input class="pin" type="password" id="l-pin" name="pin" inputmode="numeric" maxlength="8" autocomplete="off" required></div>
-      <button class="btn btn-primary" type="submit">Sign in</button>
-    </form>
-    <div class="panel-foot">
-      <p class="caption">Data folder</p>
-      <p class="path">${state.dataDir}</p>
-      <button class="link small" data-action="choose-folder">Change folder</button>
+    <h1>${title}</h1>
+    <p class="lead">${lead}</p>
+    <div class="actions">
+      ${state.reason === 'signed-out' ? html`<button class="btn btn-primary" data-action="open-abapps">Open AB Apps</button>` : ''}
+      <button class="btn btn-secondary" data-action="reload">Try again</button>
     </div>
   </div></div>`;
 }
@@ -201,7 +203,7 @@ function drawShell() {
     <header class="app-header">
       <div class="brand"><img class="logo" src="assets/logo-primary-lockup.jpg" alt="Anabaptist Brotherhood"><span class="app-name">Contractor Time</span></div>
       <div class="who"><span id="update-badge"></span><span>Signed in as <strong>${state.me.name}</strong></span>
-        <button class="btn btn-secondary btn-sm" data-action="logout">Sign out</button></div>
+        </div>
     </header>
     <div class="app-body">
       <nav class="nav">
@@ -227,10 +229,8 @@ function render() {
   if (state.screen !== 'app') $('#toast').hidden = true; // messages belong to whoever was signed in
   if (state.screen === 'folder') root.innerHTML = folderScreen().s;
   else if (state.screen === 'setup') root.innerHTML = setupScreen().s;
-  else if (state.screen === 'login') root.innerHTML = loginScreen().s;
+  else if (state.screen === 'abapps') root.innerHTML = abAppsScreen().s;
   else return go(view && allowed(view) ? view : defaultView());
-  $('#l-pin')?.focus();
-  if (state.screen === 'login' && !$('#l-person').value) $('#l-person').focus();
 }
 
 async function go(name) {
@@ -497,16 +497,9 @@ async function profileView() {
           <button class="btn btn-primary" type="submit">Save details</button>
         </form>`
       : ''}
-    <div class="section"><h2>Change your PIN</h2>
-      <form data-form="pin" style="margin-top: 12px">
-        <div class="form-error"></div>
-        <div class="field-row">
-          <div class="field"><label for="c-pin">Current PIN</label><input type="password" id="c-pin" name="current" inputmode="numeric" maxlength="8" required></div>
-          <div class="field"><label for="n-pin">New PIN</label><input type="password" id="n-pin" name="next" inputmode="numeric" maxlength="8" required></div>
-          <div class="field"><label for="n-pin2">New PIN again</label><input type="password" id="n-pin2" name="next2" inputmode="numeric" maxlength="8" required></div>
-        </div>
-        <button class="btn btn-secondary" type="submit">Change PIN</button>
-      </form>
+    <div class="section"><h2>Signing in</h2>
+      <p class="small muted" style="margin-top: 4px">Contractor Time uses your AB Apps sign-in. Your name, and whether you're a manager,
+        come from AB Apps; to sign out, sign out there.</p>
     </div>
     ${me.manager ? '' : [appearanceSection(), updatesSection()]}
   </div>`;
@@ -621,19 +614,20 @@ async function peopleView() {
   const data = await api.people();
   ui.peopleData = data;
   const templateName = (id) => data.templates.find((t) => t.id === id)?.name ?? 'Default';
+  const className = { manager: 'Manager', employee: 'Employee', contractor: 'Contractor' };
   return html`<div class="page">
-    <div class="page-head"><div><h1>People</h1><p class="sub">Everyone who can sign in. Turned-off people can't sign in, but their time and invoices are kept.</p></div>
-      <button class="btn btn-primary" data-action="add-person">Add person</button></div>
+    <div class="page-head"><div><h1>People</h1><p class="sub">People come from AB Apps, which is where to add someone, change a
+      name, or turn an account off. Here, set who logs time and their hourly rate and invoice template.</p></div></div>
     <div class="table-wrap"><table class="data">
-      <thead><tr><th>Name</th><th>Roles</th><th class="num">Hourly rate</th><th>Invoice template</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>In AB Apps</th><th>Logs time</th><th class="num">Hourly rate</th><th>Invoice template</th><th></th></tr></thead>
       <tbody>${data.people.map(
         (p) => html`<tr class="${p.active ? '' : 'is-off'}">
           <td><strong>${p.name}</strong></td>
-          <td>${p.manager ? html`<span class="tag tag-outline">Manager</span>` : ''}${p.contractor ? html`<span class="tag tag-mint">Contractor</span>` : ''}</td>
+          <td>${p.removed ? 'Removed' : html`${className[p.class]}${p.active ? '' : ', turned off'}`}</td>
+          <td>${p.contractor ? 'Yes' : 'No'}</td>
           <td class="num">${p.contractor ? (p.hourlyRate > 0 ? Fmt.money(p.hourlyRate) : 'Not set') : ''}</td>
           <td>${p.contractor ? templateName(p.templateId) : ''}</td>
-          <td>${p.active ? 'Active' : 'Turned off'}</td>
-          <td><div class="row-actions"><button class="btn btn-ghost btn-sm" data-action="edit-person" data-id="${p.id}">Change</button></div></td></tr>`,
+          <td><div class="row-actions">${p.removed ? '' : html`<button class="btn btn-ghost btn-sm" data-action="edit-person" data-id="${p.id}">Change</button>`}</div></td></tr>`,
       )}</tbody></table></div>
   </div>`;
 }
@@ -641,31 +635,19 @@ async function peopleView() {
 function personDialog(person) {
   const { templates } = ui.peopleData;
   const def = templates.find((t) => t.isDefault);
-  const isMe = person?.id === state.me.id;
   openDialog(html`<form data-form="person">
-    <input type="hidden" name="id" value="${person?.id ?? ''}">
-    <h2>${person ? `Change ${person.name}` : 'Add person'}</h2>
+    <input type="hidden" name="id" value="${person.id}">
+    <h2>${person.name}</h2>
     <div class="form-error"></div>
-    <div class="field"><label for="pp-name">Name</label><input type="text" id="pp-name" name="name" maxlength="80" required value="${person?.name ?? ''}">
-      <span class="hint">As it appears in the sign-in list.</span></div>
-    <div class="field"><span class="field-label">Roles</span>
-      <label class="check"><input type="checkbox" name="contractor"${flag(person ? person.contractor : true, 'checked')}> Contractor: logs time and creates invoices</label>
-      <label class="check"><input type="checkbox" name="manager"${flag(person?.manager, 'checked')}${flag(isMe, 'disabled')}> Manager: sees everyone, manages people, tasks and templates</label>
-      ${isMe ? html`<input type="hidden" name="manager" value="on">` : ''}</div>
+    <label class="check"><input type="checkbox" name="contractor"${flag(person.contractor, 'checked')}> Logs time and creates invoices</label>
     <div class="field-row">
-      <div class="field"><label for="pp-rate">Hourly rate ($)</label><input type="number" id="pp-rate" name="hourlyRate" min="0" step="0.01" value="${person?.hourlyRate ?? ''}">
+      <div class="field"><label for="pp-rate">Hourly rate ($)</label><input type="number" id="pp-rate" name="hourlyRate" min="0" step="0.01" value="${person.hourlyRate || ''}">
         <span class="hint">Used for new invoices.</span></div>
       <div class="field"><label for="pp-template">Invoice template</label><select id="pp-template" name="templateId">
         <option value="">Default${def ? ` (${def.name})` : ''}</option>
-        ${templates.map((t) => html`<option value="${t.id}"${flag(t.id === person?.templateId, 'selected')}>${t.name}</option>`)}</select></div>
+        ${templates.map((t) => html`<option value="${t.id}"${flag(t.id === person.templateId, 'selected')}>${t.name}</option>`)}</select></div>
     </div>
-    <div class="field"><label for="pp-pin">${person ? 'New PIN' : 'PIN'}</label>
-      <input type="password" id="pp-pin" name="pin" inputmode="numeric" maxlength="8"${flag(!person, 'required')} autocomplete="new-password">
-      <span class="hint">${person ? 'Leave blank to keep their PIN. Setting one here replaces any PIN they chose.' : '4 to 8 digits. Tell them; they can change it on their Profile page.'}</span></div>
-    ${person
-      ? html`<label class="check"><input type="checkbox" name="active"${flag(person.active, 'checked')}${flag(isMe, 'disabled')}> Can sign in</label>
-             ${isMe ? html`<input type="hidden" name="active" value="on">` : ''}`
-      : ''}
+    <p class="small muted">Their name, and whether they're a manager or can sign in, are changed in AB Apps.</p>
     <div class="dialog-actions">
       <button class="btn btn-primary" type="submit">Save</button>
       <button class="btn btn-ghost" type="button" data-action="close-dialog">Cancel</button>
@@ -938,18 +920,10 @@ const after = async (message) => {
 
 const FORMS = {
   async setup(v) {
-    if (v.pin !== v.pin2) throw new Error("The two PINs don't match.");
-    state = await api.setup({ name: v.name, pin: v.pin, contractor: v.contractor });
+    state = await api.setup({ contractor: v.contractor });
     view = null;
     render();
-    toast('Contractor Time is set up. Next, add people and tasks, and check the invoice template.');
-  },
-
-  async login(v) {
-    if (!v.personId) throw new Error('Choose your name.');
-    state = await api.login(v.personId, v.pin);
-    view = null;
-    render();
+    toast('Contractor Time is set up. Next, set hourly rates on the People page, add tasks, and check the invoice template.');
   },
 
   async timer(v) {
@@ -995,13 +969,6 @@ const FORMS = {
     toast('Details saved.');
   },
 
-  async pin(v, form) {
-    if (v.next !== v.next2) throw new Error("The two new PINs don't match.");
-    await api.changePin(v.current, v.next);
-    form.reset();
-    toast('PIN changed. Use it the next time you sign in.');
-  },
-
   async 'inv-filter'(v) {
     ui.invFilter = { personId: v.personId, status: v.status };
     await drawView();
@@ -1017,7 +984,7 @@ const FORMS = {
 
   async person(v) {
     await api.savePerson(v);
-    await after(v.id ? 'Saved.' : `${v.name} added. They can sign in once OneDrive has synced.`);
+    await after('Saved.');
   },
 
   async task(v) {
@@ -1121,12 +1088,7 @@ const ACTIONS = {
 
   'release-page': () => api.openReleasePage(),
 
-  async logout() {
-    state = await api.logout();
-    view = null;
-    Object.keys(ui).forEach((k) => delete ui[k]);
-    render();
-  },
+  'open-abapps': () => api.openABApps(),
 
   'add-entry': () => entryDialog(null),
   'edit-entry': (d) => entryDialog(ui.entries.find((e) => e.id === d.id)),
@@ -1177,7 +1139,6 @@ const ACTIONS = {
         <button class="btn btn-ghost" type="button" data-action="close-dialog">Cancel</button>
       </div></form>`),
 
-  'add-person': () => personDialog(null),
   'edit-person': (d) => personDialog(ui.peopleData.people.find((p) => p.id === d.id)),
 
   'add-task': () => taskDialog(null),
@@ -1230,6 +1191,18 @@ document.addEventListener('click', async (event) => {
     if (dialogEl.open && dialogEl.querySelector('.form-error')) dialogEl.querySelector('.form-error').textContent = err.message;
     else toast(err.message, { error: true });
   }
+});
+
+// Someone signed in to or out of AB Apps: start over as whoever is signed in now.
+api.onIdentityChanged(async () => {
+  const before = state?.me?.id ?? null;
+  state = await api.getState();
+  if ((state.me?.id ?? null) !== before) {
+    view = null;
+    Object.keys(ui).forEach((k) => delete ui[k]);
+    if (dialogEl.open) closeDialog();
+  }
+  render();
 });
 
 api.getState().then((s) => {

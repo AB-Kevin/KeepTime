@@ -20,8 +20,8 @@ contextBridge.exposeInMainWorld('api', {
   onUpdateFound: (callback) => ipcRenderer.on('update-found', (_event, release) => callback(release)),
   onUpdateProgress: (callback) => ipcRenderer.on('update-progress', (_event, progress) => callback(progress)),
   setup: (input) => call('setup:create', input),
-  login: (personId, pin) => call('auth:login', { personId, pin }),
-  logout: () => call('auth:logout'),
+  openABApps: () => call('abapps:open'),
+  onIdentityChanged: (callback) => ipcRenderer.on('identity-changed', () => callback()),
 
   timer: () => call('timer:get'),
   startTimer: (input) => call('timer:start', input),
@@ -41,7 +41,6 @@ contextBridge.exposeInMainWorld('api', {
 
   profile: () => call('profile:get'),
   saveProfile: (input) => call('profile:save', input),
-  changePin: (current, next) => call('pin:change', { current, next }),
 
   overview: () => call('mgr:overview'),
   people: () => call('mgr:people'),

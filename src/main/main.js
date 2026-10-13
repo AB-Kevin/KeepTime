@@ -8,7 +8,7 @@ const { spawn } = require('child_process');
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme, net } = require('electron');
 const { readJson, writeJson } = require('./jsonfile');
 const { Store } = require('./store');
-const { pinProblem, hashPin, verifyPin, currentPin, Lockout } = require('./auth');
+const abApps = require('./abapps');
 const time = require('./time');
 const invoices = require('./invoices');
 const { renderInvoice } = require('./invoice-html');
@@ -33,10 +33,10 @@ if (!isPrimaryInstance) app.quit();
 
 let win = null;
 let store = null;
-let session = null; // { personId, signedInAt }
+let session = null; // { personId, name, signedInAt }
+let identity = null; // who AB Apps says is signed in, from the last read of identity.json
 let heartbeat = null;
 let quitting = false;
-const lockout = new Lockout();
 const savedFiles = new Set(); // PDFs saved this session, which the window may ask to open
 let latestRelease = null; // from the last update check; updates are only downloaded from it
 let installing = null;
@@ -74,15 +74,63 @@ function suggestedFolder() {
 }
 
 // Session -------------------------------------------------------------------
+// Whoever is signed in to AB Apps is signed in here. Contractor Time follows
+// identity.json as it changes, so signing out of AB Apps, or someone else
+// signing in there, signs out here too.
+
+/** Everyone: the AB Apps folder's people with this folder's records for them. */
+function people() {
+  if (!identity) throw new UserError('Sign in to AB Apps first.');
+  return manage.mergePeople(abApps.readDirectory(identity.dataDir), store.people());
+}
 
 function me() {
   if (!store || !session) throw new UserError('Sign in first.');
-  const person = store.people().find((p) => p.id === session.personId);
+  const person = people().find((p) => p.id === session.personId);
   if (!person?.active) {
     signOut();
-    throw new UserError('Your account has been turned off. Ask a manager if that is a mistake.');
+    throw new UserError('Your account has been turned off in AB Apps. Ask a manager if that is a mistake.');
   }
   return person;
+}
+
+/**
+ * Starts a session for the person AB Apps has signed in, if there is one and
+ * they may use Contractor Time on this computer. Returns why not, or null.
+ */
+function startSession() {
+  if (session) return null;
+  if (!identity) return { reason: 'signed-out' };
+  let person;
+  try {
+    person = people().find((p) => p.id === identity.personId);
+  } catch (err) {
+    return { reason: 'unreadable', message: err.message };
+  }
+  if (!person) return { reason: 'unknown' };
+  if (!person.active) return { reason: 'turned-off' };
+  // Two computers saving the same person's time would make OneDrive keep two copies.
+  const elsewhere = store.presence(person.id);
+  if (presence.isSignedIn(elsewhere) && elsewhere.computer !== presence.computerName()) {
+    const minutes = presence.minutesUntilStale(elsewhere);
+    return {
+      reason: 'elsewhere',
+      message: `You're using Contractor Time on ${elsewhere.computer}. Close it there first. If that computer is off or asleep, you can use it here in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+    };
+  }
+  session = { personId: person.id, name: person.name, signedInAt: new Date().toISOString() };
+  startHeartbeat();
+  return null;
+}
+
+/** Re-reads identity.json; when someone else, or no one, is signed in to AB Apps now, signs out here and tells the window. */
+function checkIdentity() {
+  const next = abApps.readIdentity(app.getPath('appData'));
+  const changed = (next?.personId ?? null) !== (identity?.personId ?? null) || next?.name !== identity?.name || next?.dataDir !== identity?.dataDir;
+  identity = next;
+  if (!changed) return;
+  if (session && session.personId !== next?.personId) signOut();
+  win?.webContents.send('identity-changed');
 }
 
 function asContractor() {
@@ -97,14 +145,11 @@ function asManager() {
   return person;
 }
 
-const publicPerson = ({ pin, ...person }) => person;
-
 function writePresence(signedOut = false) {
   if (!store || !session) return;
-  const person = store.people().find((p) => p.id === session.personId);
   store.savePresence(session.personId, {
     personId: session.personId,
-    name: person?.name ?? '',
+    name: session.name,
     computer: presence.computerName(),
     signedInAt: session.signedInAt,
     seen: new Date().toISOString(),
@@ -144,6 +189,7 @@ function createWindow() {
   });
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.on('focus', checkIdentity);
   win.on('close', confirmClose);
   // Invoice windows close with it.
   win.on('closed', () => {
@@ -337,21 +383,16 @@ function appState() {
 
 function screenState() {
   const config = loadConfig();
+  if (!identity) return { screen: 'abapps', reason: 'signed-out' };
   if (!store) return { screen: 'folder', dataDir: config.dataDir ?? null, suggested: suggestedFolder() };
-  if (!store.isDataFolder()) return { screen: 'setup', dataDir: store.dataDir };
-  if (!session) {
-    const people = store
-      .people()
-      .filter((p) => p.active)
-      .map(({ id, name }) => ({ id, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    return { screen: 'login', dataDir: store.dataDir, people, lastPersonId: config.lastPersonId ?? null };
-  }
+  if (!store.isDataFolder()) return { screen: 'setup', dataDir: store.dataDir, canSetUp: identity.class === 'manager', name: identity.name };
+  const problem = startSession();
+  if (problem) return { screen: 'abapps', name: identity.name, ...problem };
   return {
     screen: 'app',
     dataDir: store.dataDir,
     computer: presence.computerName(),
-    me: publicPerson(me()),
+    me: me(),
     settings: store.settings(),
     tasks: store.tasks(),
   };
@@ -410,11 +451,12 @@ function overview() {
   const week = startOfWeek();
   const tomorrow = startOfToday();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const rows = store
-    .people()
+  // Everyone in AB Apps is listed there; here, only those who have used Contractor Time or been set up in it.
+  const rows = people()
     .filter((p) => p.active)
-    .map((p) => {
-      const seen = store.presence(p.id);
+    .map((p) => ({ p, seen: store.presence(p.id) }))
+    .filter(({ p, seen }) => seen || p.number)
+    .map(({ p, seen }) => {
       const row = {
         id: p.id,
         name: p.name,
@@ -512,51 +554,28 @@ function registerHandlers() {
     if (store) shell.openPath(store.dataDir);
   });
 
-  handle('setup:create', ({ name, pin, contractor }) => {
+  handle('setup:create', ({ contractor }) => {
     if (!store || store.isDataFolder()) throw new UserError('This folder is already set up.');
-    const now = new Date();
-    const people = [];
-    const { errors, person } = manage.savePerson(people, { name, pin, manager: true, contractor, hourlyRate: 0 }, null, now);
-    fail(errors);
+    if (identity?.class !== 'manager') throw new UserError('Only a manager in AB Apps can set up Contractor Time.');
+    const records = [];
+    // A manager logs time only if they say so; everyone else does without being set up here.
+    if (contractor) fail(manage.saveContractor(records, people(), { id: identity.personId, contractor: true, hourlyRate: 0 }, new Date()));
     const template = invoices.newTemplate();
     store.saveTemplates([template]);
     store.saveTasks([]);
     store.saveSettings({ ...store.settings(), defaultTemplateId: template.id });
-    store.savePeople(people); // last, since its presence marks the folder as set up
-    session = { personId: person.id, signedInAt: now.toISOString() };
-    startHeartbeat();
-    saveConfig({ lastPersonId: person.id });
+    store.savePeople(records); // last, since its presence marks the folder as set up
     return appState();
   });
 
-  handle('auth:login', ({ personId, pin }) => {
-    if (!store) throw new UserError('Choose the data folder first.');
-    const wait = lockout.wait(personId);
-    if (wait) throw new UserError(`Too many wrong PINs. Try again in ${wait} seconds.`);
-    const person = store.people().find((p) => p.id === personId && p.active);
-    if (!person) throw new UserError('Choose your name.');
-    if (!verifyPin(pin, currentPin(person, store.profile(person.id)))) {
-      lockout.fail(personId);
-      throw new UserError("That PIN isn't right.");
+  handle('abapps:open', async () => {
+    const exe = await abApps.findABApps();
+    if (!exe) throw new UserError("AB Apps isn't installed on this computer. Ask a manager for its installer.");
+    try {
+      await abApps.openABApps(exe);
+    } catch (err) {
+      throw new UserError(`AB Apps couldn't be opened: ${err.message}`);
     }
-    lockout.clear(personId);
-    // Two computers saving the same person's time would make OneDrive keep two copies.
-    const elsewhere = store.presence(person.id);
-    if (presence.isSignedIn(elsewhere) && elsewhere.computer !== presence.computerName()) {
-      const minutes = presence.minutesUntilStale(elsewhere);
-      throw new UserError(
-        `You're signed in on ${elsewhere.computer}. Sign out there first. If that computer is off or asleep, you can sign in here in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
-      );
-    }
-    session = { personId: person.id, signedInAt: new Date().toISOString() };
-    startHeartbeat();
-    saveConfig({ lastPersonId: person.id });
-    return appState();
-  });
-
-  handle('auth:logout', () => {
-    signOut();
-    return appState();
   });
 
   // Contractor: timer and time ------------------------------------------------------
@@ -675,15 +694,6 @@ function registerHandlers() {
     store.saveProfile(person.id, profile);
   });
 
-  handle('pin:change', ({ current, next }) => {
-    const person = me();
-    const profile = store.profile(person.id);
-    if (!verifyPin(current, currentPin(person, profile))) throw new UserError("Your current PIN isn't right.");
-    fail([pinProblem(next)].filter(Boolean));
-    profile.pin = hashPin(next);
-    store.saveProfile(person.id, profile);
-  });
-
   handle('open:file', (filePath) => {
     if (!savedFiles.has(filePath)) throw new UserError("That file wasn't saved here.");
     shell.openPath(filePath);
@@ -700,20 +710,18 @@ function registerHandlers() {
     asManager();
     const settings = store.settings();
     return {
-      people: store
-        .people()
-        .map(publicPerson)
+      people: people()
+        .filter((p) => p.active || p.contractor)
         .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name)),
       templates: store.templates().map(({ id, name }) => ({ id, name, isDefault: id === settings.defaultTemplateId })),
     };
   });
 
   handle('mgr:person:save', (input) => {
-    const actor = asManager();
-    const people = store.people();
-    const { errors } = manage.savePerson(people, input, actor.id, new Date());
-    fail(errors);
-    store.savePeople(people);
+    asManager();
+    const records = store.people();
+    fail(manage.saveContractor(records, people(), input, new Date()));
+    store.savePeople(records);
   });
 
   handle('mgr:tasks:save', (input) => {
@@ -735,12 +743,12 @@ function registerHandlers() {
   handle('mgr:templates', () => {
     asManager();
     const settings = store.settings();
-    const people = store.people().filter((p) => p.active && p.contractor);
+    const users = people().filter((p) => p.active && p.contractor);
     return {
       templates: store.templates().map((t) => ({
         ...t,
         isDefault: t.id === settings.defaultTemplateId,
-        users: people.filter((p) => p.templateId === t.id).map((p) => p.name),
+        users: users.filter((p) => p.templateId === t.id).map((p) => p.name),
       })),
       detailOptions: invoices.DETAIL,
     };
@@ -777,7 +785,7 @@ function registerHandlers() {
   handle('mgr:template:delete', (id) => {
     asManager();
     if (store.settings().defaultTemplateId === id) throw new UserError("The default template can't be deleted. Make another one the default first.");
-    const users = store.people().filter((p) => p.active && p.templateId === id);
+    const users = people().filter((p) => p.active && p.contractor && p.templateId === id);
     if (users.length) {
       throw new UserError(`${users.map((p) => p.name).join(', ')} ${users.length === 1 ? 'uses' : 'use'} this template. Change that on the People page first.`);
     }
@@ -803,7 +811,7 @@ function registerHandlers() {
   handle('mgr:invoices', () => {
     asManager();
     const list = [];
-    for (const p of store.people().filter((x) => x.contractor)) {
+    for (const p of people().filter((x) => x.contractor)) {
       for (const inv of store.invoices(p.id)) {
         const { lines, template, entryIds, ...summary } = inv;
         list.push({ ...summary, personId: p.id, personName: p.name, active: p.active });
@@ -814,7 +822,7 @@ function registerHandlers() {
 
   handle('mgr:entries', ({ personId, from, to }) => {
     asManager();
-    const person = store.people().find((p) => p.id === personId);
+    const person = people().find((p) => p.id === personId);
     if (!person) throw new UserError('Choose a contractor.');
     return entriesBetween(store.entries(person.id), from, to);
   });
@@ -853,6 +861,9 @@ app.whenReady().then(() => {
     // The installer that just ran may still be closing; it is removed next time.
   }
   openStore();
+  identity = abApps.readIdentity(app.getPath('appData'));
+  // AB Apps rewrites or removes the file as people sign in and out there.
+  fs.watchFile(abApps.identityPath(app.getPath('appData')), { interval: 2000 }, checkIdentity);
   registerHandlers();
   createWindow();
   checkQuietly();

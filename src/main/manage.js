@@ -1,65 +1,76 @@
 'use strict';
 
-// Rules for what managers keep in the shared folder: people, tasks and
-// settings. Each function changes the list it's given and returns problems
-// to show; an empty list means the caller should save.
+// Rules for what managers keep in the shared folder: what Contractor Time
+// needs to know about people, tasks and settings. Each save function changes
+// the list it's given and returns problems to show; an empty list means the
+// caller should save.
+//
+// Names, classes and who can sign in come from AB Apps (see abapps.js).
+// shared/people.json here keeps only what's particular to Contractor Time,
+// one record per person id: whether they log time, their hourly rate,
+// invoice template and the number in their invoice numbers.
 
 const crypto = require('crypto');
-const { pinProblem, hashPin } = require('./auth');
 
 const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** Adds or updates a person. `actorId` is the manager making the change. */
-function savePerson(list, input, actorId, now) {
-  const isNew = !input.id;
-  const existing = isNew ? null : list.find((p) => p.id === input.id);
-  if (!isNew && !existing) return { errors: ['That person no longer exists.'] };
-
-  const errors = [];
-  const name = String(input.name ?? '').trim().replace(/\s+/g, ' ');
-  const active = isNew ? true : Boolean(input.active);
-  const contractor = Boolean(input.contractor);
-  const manager = Boolean(input.manager);
-
-  if (!name) errors.push('Enter a name.');
-  else if (name.length > 80) errors.push('Keep the name under 80 characters.');
-  else if (active && list.some((p) => p.id !== input.id && p.active && sameName(p.name, name))) {
-    errors.push('Someone else is listed with that name. Add a last name or initial so people can tell them apart at sign-in.');
+/**
+ * Everyone Contractor Time knows: the people in AB Apps with what managers set
+ * here. Managers are managers here too. Employees and contractors log time
+ * unless a manager says otherwise; managers don't unless a manager says they
+ * do. Someone removed from AB Apps who has a record here is kept, turned off,
+ * so their time and invoices stay visible.
+ */
+function mergePeople(directory, records) {
+  const byId = new Map(records.map((r) => [r.id, r]));
+  const fromRecord = (r, fallbackLogsTime) => ({
+    contractor: typeof r?.contractor === 'boolean' ? r.contractor : fallbackLogsTime,
+    hourlyRate: r?.hourlyRate ?? 0,
+    templateId: r?.templateId ?? null,
+    number: r?.number ?? null,
+  });
+  const people = directory.map((d) => ({
+    id: d.id,
+    name: d.name,
+    class: d.class,
+    active: d.active,
+    manager: d.class === 'manager',
+    ...fromRecord(byId.get(d.id), d.class !== 'manager'),
+  }));
+  for (const r of records) {
+    if (people.some((p) => p.id === r.id)) continue;
+    people.push({ id: r.id, name: r.name || 'Removed from AB Apps', class: null, active: false, manager: false, removed: true, ...fromRecord(r, false) });
   }
-  if (!contractor && !manager) errors.push('Choose at least one role.');
+  return people;
+}
 
+/** Sets what Contractor Time needs for one person: whether they log time, their rate and template. */
+function saveContractor(records, people, input, now) {
+  const person = people.find((p) => p.id === input.id);
+  if (!person || person.removed) return ["That person isn't in AB Apps any more."];
   const rate = input.hourlyRate === '' || input.hourlyRate == null ? 0 : Number(input.hourlyRate);
-  if (!Number.isFinite(rate) || rate < 0 || rate > 10000) errors.push('Enter the hourly rate in dollars, such as 25 or 32.50.');
+  if (!Number.isFinite(rate) || rate < 0 || rate > 10000) return ['Enter the hourly rate in dollars, such as 25 or 32.50.'];
 
-  const pin = String(input.pin ?? '').trim();
-  if (isNew && !pin) errors.push('Set a PIN for the new person.');
-  if (pin && pinProblem(pin)) errors.push(pinProblem(pin));
-
-  if (existing && existing.id === actorId) {
-    if (!manager) errors.push("You can't remove your own manager role.");
-    if (!active) errors.push("You can't turn off your own account.");
-  } else if (existing && existing.manager && existing.active && !(manager && active)) {
-    const others = list.some((p) => p.id !== existing.id && p.manager && p.active);
-    if (!others) errors.push('At least one active manager is needed.');
+  let record = records.find((r) => r.id === person.id);
+  if (!record) {
+    record = {
+      id: person.id,
+      number: records.reduce((max, r) => Math.max(max, r.number ?? 0), 0) + 1,
+      created: now.toISOString(),
+    };
+    records.push(record);
   }
-  if (errors.length) return { errors };
-
-  const person = existing ?? {
-    id: crypto.randomUUID(),
-    number: list.reduce((max, p) => Math.max(max, p.number ?? 0), 0) + 1,
-    created: now.toISOString(),
-  };
-  Object.assign(person, {
-    name,
-    contractor,
-    manager,
-    active,
+  // Left from before people moved to AB Apps; AB Apps has these now.
+  delete record.pin;
+  delete record.manager;
+  delete record.active;
+  Object.assign(record, {
+    name: person.name, // shown if they're ever removed from AB Apps
+    contractor: Boolean(input.contractor),
     hourlyRate: Math.round(rate * 100) / 100,
     templateId: input.templateId || null,
   });
-  if (pin) person.pin = hashPin(pin, now);
-  if (isNew) list.push(person);
-  return { errors: [], person };
+  return [];
 }
 
 function saveTask(list, input) {
@@ -97,4 +108,4 @@ function settingsProblems(input) {
   return errors;
 }
 
-module.exports = { savePerson, saveTask, moveTask, settingsProblems };
+module.exports = { mergePeople, saveContractor, saveTask, moveTask, settingsProblems };
