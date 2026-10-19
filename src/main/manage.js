@@ -17,10 +17,9 @@ const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /**
  * Everyone KeepTime knows: the people in AB Apps with what managers set
- * here. Managers are managers here too. Employees and contractors log time
- * unless a manager says otherwise; managers don't unless a manager says they
- * do. Someone removed from AB Apps who has a record here is kept, turned off,
- * so their time and invoices stay visible.
+ * here. Managers are managers here too. Everyone logs time unless a manager
+ * says otherwise. Someone removed from AB Apps who has a record here is kept,
+ * turned off, so their time and invoices stay visible.
  */
 function mergePeople(directory, records) {
   const byId = new Map(records.map((r) => [r.id, r]));
@@ -38,7 +37,7 @@ function mergePeople(directory, records) {
     class: d.class,
     active: d.active,
     manager: d.class === 'manager',
-    ...fromRecord(byId.get(d.id), d.class !== 'manager'),
+    ...fromRecord(byId.get(d.id), true),
   }));
   for (const r of records) {
     if (people.some((p) => p.id === r.id)) continue;

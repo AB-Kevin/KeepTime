@@ -5,7 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const { spawn } = require('child_process');
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme, net, safeStorage } = require('electron');
 const { readJson, writeJson } = require('./jsonfile');
 const { Store } = require('./store');
 const abApps = require('./abapps');
@@ -14,6 +14,8 @@ const invoices = require('./invoices');
 const { renderInvoice } = require('./invoice-html');
 const presence = require('./presence');
 const manage = require('./manage');
+const timesheets = require('./timesheets');
+const mailer = require('./mailer');
 const Fmt = require('../shared/format');
 const { RELEASES_PAGE, checkForUpdate, downloadInstaller } = require('./updates');
 
@@ -42,6 +44,9 @@ let quitting = false;
 const savedFiles = new Set(); // PDFs saved this session, which the window may ask to open
 let latestRelease = null; // from the last update check; updates are only downloaded from it
 let installing = null;
+let timesheetSending = null; // the timesheet email being sent
+let timesheetRetryAt = 0;
+const timesheetsSentHere = new Set(); // periods sent this session, in case recording one failed
 
 const updatesDir = () => path.join(app.getPath('temp'), 'KeepTime updates');
 
@@ -51,7 +56,7 @@ const fail = (errors) => {
   if (errors.length) throw new UserError(errors.join(' '));
 };
 
-// This computer's settings: only where the data folder is and who signed in last.
+// This computer's settings: where the data folder is, the theme, and the timesheet email's password.
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
 const loadConfig = () => readJson(configPath(), {});
 const saveConfig = (changes) => writeJson(configPath(), { ...loadConfig(), ...changes });
@@ -400,6 +405,119 @@ async function installUpdate() {
   return { installing: true };
 }
 
+// Timesheet email -----------------------------------------------------------------
+// KeepTime has no server, so any manager's app sends it: each checks every
+// minute while a manager is signed in, and sends when it's due and no manager
+// has recorded sending it. Their apps take turns, a few minutes apart, so the
+// first one's record has time to sync before the next would send; OneDrive
+// running slow can still mean two copies. An app closed at the time sends as
+// soon as it's opened. What each sent is in their people/<id>/timesheets.json.
+//
+// The mail server's password is kept on each computer that sends, encrypted for
+// its Windows account, since everyone who logs time can read the shared folder.
+
+const TIMESHEET_TURN_MS = 10 * 60 * 1000;
+const TIMESHEET_RETRY_MS = 15 * 60 * 1000;
+
+/** The mail server password saved on this computer, or ''. */
+function smtpPassword() {
+  const { smtpPassword: saved } = loadConfig();
+  if (!saved) return '';
+  try {
+    return safeStorage.decryptString(Buffer.from(saved, 'base64'));
+  } catch {
+    return ''; // saved by another Windows account, or Windows' keys changed: enter it again
+  }
+}
+
+function saveSmtpPassword(password) {
+  if (!safeStorage.isEncryptionAvailable()) throw new UserError("Windows can't keep the password safe on this computer, so it wasn't saved.");
+  saveConfig({ smtpPassword: safeStorage.encryptString(password).toString('base64') });
+}
+
+/** Whether this computer can send: it has the password, unless the server takes mail without one. */
+const canSendHere = (smtp) => Boolean(smtp.host) && (!smtp.user || Boolean(smtpPassword()));
+
+/** Emails the timesheets for the period `occ` covers to `to`. Returns how many files were attached. */
+async function sendTimesheets(occ, to, { test = false } = {}) {
+  const settings = store.settings();
+  const included = people()
+    .filter(timesheets.included)
+    .map((p) => ({ name: p.name, active: p.active, entries: store.entries(p.id) }));
+  const email = timesheets.buildEmail({ from: occ.from, to: occ.to, people: included, test });
+  try {
+    await mailer.sendMail({ ...timesheets.smtpOf(settings), password: smtpPassword() }, { to, ...email });
+  } catch (err) {
+    throw new UserError(`The timesheet email couldn't be sent: ${err.message}`);
+  }
+  return email.attachments.length;
+}
+
+function checkTimesheets() {
+  if (timesheetSending || !store || !session || Date.now() < timesheetRetryAt) return;
+  timesheetSending = sendTimesheetsIfDue()
+    .catch((err) => console.error('timesheets', err))
+    .finally(() => {
+      timesheetSending = null;
+    });
+}
+
+async function sendTimesheetsIfDue() {
+  const now = new Date();
+  const everyone = people();
+  const person = everyone.find((p) => p.id === session?.personId);
+  if (!person?.manager || !person.active) return;
+  const settings = store.settings();
+  const schedule = timesheets.scheduleOf(settings);
+  const occ = timesheets.due(schedule, now);
+  if (!occ || timesheetsSentHere.has(occ.key) || !canSendHere(timesheets.smtpOf(settings))) return;
+  const managers = everyone.filter((p) => p.manager && p.active).sort((a, b) => a.id.localeCompare(b.id));
+  if (managers.some((m) => timesheets.wasSent(store.timesheetLog(m.id), occ.key))) return;
+  const turn = managers.findIndex((m) => m.id === person.id);
+  if (now.getTime() < occ.sendAt.getTime() + turn * TIMESHEET_TURN_MS) return;
+
+  let files;
+  try {
+    files = await sendTimesheets(occ, schedule.recipients);
+  } catch (err) {
+    timesheetRetryAt = Date.now() + TIMESHEET_RETRY_MS;
+    const problem = { key: occ.key, from: occ.from, to: occ.to, at: new Date().toISOString(), message: err.message };
+    store.saveTimesheetLog(person.id, { ...store.timesheetLog(person.id), problem });
+    return;
+  }
+  timesheetsSentHere.add(occ.key);
+  const record = { key: occ.key, from: occ.from, to: occ.to, sentAt: new Date().toISOString(), recipients: schedule.recipients, files, computer: presence.computerName() };
+  store.saveTimesheetLog(person.id, timesheets.recordSent(store.timesheetLog(person.id), record));
+}
+
+/** The timesheet email's settings and what's happened with it, for the Settings page. */
+function timesheetStatus() {
+  const settings = store.settings();
+  const schedule = timesheets.scheduleOf(settings);
+  const smtp = timesheets.smtpOf(settings);
+  const now = new Date();
+  const sent = people()
+    .filter((p) => p.manager)
+    .flatMap((p) => (store.timesheetLog(p.id).sent ?? []).map((s) => ({ ...s, by: p.name })))
+    .sort((a, b) => b.sentAt.localeCompare(a.sentAt));
+  const { problem } = store.timesheetLog(session.personId);
+  const due = timesheets.due(schedule, now);
+  const waiting = due && !sent.some((s) => s.key === due.key) ? due : null;
+  const period = (occ) => occ && { sendAt: occ.sendAt.toISOString(), from: occ.from, to: occ.to };
+  return {
+    schedule,
+    smtp,
+    hasPassword: Boolean(smtpPassword()),
+    canSendHere: canSendHere(smtp),
+    testAddress: loadConfig().timesheetTestAddress ?? '',
+    waiting: period(waiting),
+    next: period(timesheets.next(schedule, now)),
+    last: sent[0] ?? null,
+    // This app's last failure, while that period is still waiting to go.
+    problem: problem && problem.key === waiting?.key ? problem : null,
+  };
+}
+
 // Data the window shows ---------------------------------------------------------
 
 function appState() {
@@ -592,8 +710,8 @@ function registerHandlers() {
     if (!store || store.isDataFolder()) throw new UserError('This folder is already set up.');
     if (identity?.class !== 'manager') throw new UserError('Only a manager in AB Apps can set up KeepTime.');
     const records = [];
-    // A manager logs time only if they say so; everyone else does without being set up here.
-    if (contractor) fail(manage.saveContractor(records, people(), { id: identity.personId, contractor: true, hourlyRate: 0 }, new Date()));
+    // Everyone logs time unless a manager says otherwise, so this is saved only when they don't.
+    if (!contractor) fail(manage.saveContractor(records, people(), { id: identity.personId, contractor: false, hourlyRate: 0 }, new Date()));
     const template = invoices.newTemplate();
     store.saveTemplates([template]);
     store.saveTasks([]);
@@ -867,6 +985,36 @@ function registerHandlers() {
     });
   });
 
+  handle('mgr:timesheets', () => {
+    asManager();
+    return timesheetStatus();
+  });
+
+  handle('mgr:timesheets:save', (input) => {
+    asManager();
+    const { errors, schedule, smtp, testAddress } = timesheets.readSettings(input, store.settings().timesheets, new Date());
+    fail(errors);
+    if (input.password) saveSmtpPassword(String(input.password));
+    saveConfig({ timesheetTestAddress: testAddress });
+    store.saveSettings({ ...store.settings(), timesheets: schedule, smtp });
+    timesheetRetryAt = 0; // a failed send may work with the new settings
+  });
+
+  // Sends the period the latest scheduled email covered, as it's saved, to the test address only.
+  handle('mgr:timesheets:test', async () => {
+    asManager();
+    const settings = store.settings();
+    const smtp = timesheets.smtpOf(settings);
+    const address = loadConfig().timesheetTestAddress;
+    if (!address) throw new UserError('Enter an address to send the test to.');
+    if (!smtp.host) throw new UserError('Enter the mail server.');
+    if (!canSendHere(smtp)) throw new UserError('Enter the mail server password.');
+    const schedule = timesheets.scheduleOf(settings);
+    const occ = timesheets.latest({ ...schedule, firstSend: schedule.firstSend ?? Fmt.dayKey(new Date()) }, new Date());
+    await sendTimesheets(occ, address, { test: true });
+    return address;
+  });
+
   handle('mgr:invoices', () => {
     asManager();
     const list = [];
@@ -896,7 +1044,9 @@ function startHeartbeat() {
     } catch (err) {
       console.error('presence', err);
     }
+    checkTimesheets();
   }, presence.HEARTBEAT_MS);
+  setTimeout(checkTimesheets, 5000); // after the window has what it needs to draw
 }
 
 app.setAppUserModelId(APP_ID);

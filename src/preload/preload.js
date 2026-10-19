@@ -55,6 +55,9 @@ contextBridge.exposeInMainWorld('api', {
   deleteTemplate: (id) => call('template:delete', id),
   previewTemplate: (input) => call('template:preview', input),
   saveSettings: (input) => call('mgr:settings:save', input),
+  timesheets: () => call('mgr:timesheets'),
+  saveTimesheets: (input) => call('mgr:timesheets:save', input),
+  testTimesheets: () => call('mgr:timesheets:test'),
   allInvoices: () => call('mgr:invoices'),
   personEntries: (personId, from, to) => call('mgr:entries', { personId, from, to }),
 });

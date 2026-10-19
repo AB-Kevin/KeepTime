@@ -9,10 +9,12 @@
 //                            you working on" list
 //   shared/templates.json    managers and anyone who logs time: invoice
 //                            templates (only managers change the default)
-//   shared/settings.json     managers: policies and the default template
+//   shared/settings.json     managers: policies, the default template and
+//                            the timesheet email
 //   people/<id>/*.json       only that person, signed in on one computer at a
 //                            time: their time, invoices, profile (including
-//                            the rate and template they set) and presence
+//                            the rate and template they set) and presence;
+//                            for managers, the timesheet emails they've sent
 //
 // Saves to shared files re-read the file and change only the record being
 // saved, so two people editing different records a minute apart don't undo
@@ -26,9 +28,11 @@ const DEFAULT_SETTINGS = {
   editWindowDays: 14, // how far back people can add, change or delete their own time; 0 for no limit
   longTimerHours: 10, // running timers older than this are flagged as possibly forgotten
   defaultTemplateId: null,
+  timesheets: null, // the timesheet email's schedule and recipients (see timesheets.js)
+  smtp: null, // the mail server it's sent through, without the password
 };
 
-const PERSONAL_FILES = new Set(['profile.json', 'entries.json', 'invoices.json', 'presence.json']);
+const PERSONAL_FILES = new Set(['profile.json', 'entries.json', 'invoices.json', 'presence.json', 'timesheets.json']);
 const SHARED_FILES = new Set(['people.json', 'tasks.json', 'templates.json', 'settings.json']);
 
 class Store {
@@ -115,6 +119,19 @@ class Store {
 
   savePresence(personId, presence) {
     writeJson(this.personal(personId, 'presence.json'), presence);
+  }
+
+  /** A manager's record of the timesheet emails their app sent: { sent: [...], problem }. */
+  timesheetLog(personId) {
+    try {
+      return readJson(this.personal(personId, 'timesheets.json'), {});
+    } catch {
+      return {}; // damaged: at worst a period is sent twice
+    }
+  }
+
+  saveTimesheetLog(personId, log) {
+    writeJson(this.personal(personId, 'timesheets.json'), log);
   }
 
   /**

@@ -19,10 +19,15 @@ const directory = [
   { id: ids.cy, name: 'Cy Lapp', class: 'employee', active: false },
 ];
 
-test('people come from AB Apps; employees and contractors log time, managers only if set to', () => {
-  const people = manage.mergePeople(directory, []);
+test('people come from AB Apps; everyone logs time unless set not to', () => {
+  const people = manage.mergePeople(directory, [{ id: ids.cy, number: 1, contractor: false }]);
   assert.deepEqual(people.map((p) => [p.name, p.manager, p.contractor, p.active, p.hourlyRate, p.number]), [
-    ['Ann Miller', true, false, true, 0, null],
+    ['Ann Miller', true, true, true, 0, null],
+    ['Ben Yoder', false, true, true, 0, null],
+    ['Cy Lapp', false, false, false, 0, 1],
+  ]);
+  assert.deepEqual(manage.mergePeople(directory, []).map((p) => [p.name, p.manager, p.contractor, p.active, p.hourlyRate, p.number]), [
+    ['Ann Miller', true, true, true, 0, null],
     ['Ben Yoder', false, true, true, 0, null],
     ['Cy Lapp', false, true, false, 0, null],
   ]);
