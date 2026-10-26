@@ -40,8 +40,8 @@
       "icon": "build/icon.png"
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
+      "perMachine": false,
       "artifactName": "KeepTime-Setup-${version}.${ext}"
     }
   }
