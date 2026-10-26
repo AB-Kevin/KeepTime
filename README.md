@@ -19,7 +19,7 @@ Each computer chooses the folder only once.
 
 ### Moving from the old sign-in
 
-Before version 0.2, this app kept its own people and PINs. To move them to AB Apps, a manager chooses **Import from Contractor Time** on AB Apps' People page and picks this folder. Everyone keeps their id, so their time and invoices stay theirs, and their PIN. Someone already in AB Apps under the same name (often the manager who set it up) is linked to their KeepTime records instead of being added twice. Rates, templates and invoice numbers stay in this folder.
+Before version 0.2, this app kept its own people and PINs. AB Apps 0.1.0 to 0.1.2 moved them across with **Import from Contractor Time** on the People page, keeping everyone's id so their time and invoices stayed theirs. AB Apps 0.1.3 removed that import once the move was done. Someone added on AB Apps' People page now gets a new id, so a folder from before 0.2 that was never imported doesn't link to them: import it with AB Apps 0.1.2 first. Rates, templates and invoice numbers stay in this folder.
 
 ## How the data is stored
 
