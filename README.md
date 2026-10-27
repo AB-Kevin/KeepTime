@@ -86,7 +86,7 @@ git push --follow-tags  # or run `git config push.followTags true` once, then pl
 The release appears on the repository's **Releases** page a few minutes later as `KeepTime-Setup-X.Y.Z.exe`, with a `latest.yml` beside it and notes listing the changes since the previous release. Follow the build under the **Actions** tab. The build stops without publishing if the tag doesn't match the version in package.json or a test fails.
 
 - `latest.yml` lists the installer's version, size and SHA-512 digest. electron-builder writes it because package.json's `build.publish` names this repository. Keep the tag as `vX.Y.Z` and leave `artifactName` as it is.
-- The app reads `latest.yml` from the latest release (`src/main/updates.js`) when it opens and when someone chooses **Check for updates** (Settings for managers, Profile for everyone else). A waiting update shows as **Update available** in the header. **Download and install** checks the installer against the digest, asks, then closes the app and installs over it, keeping the install folder and shortcuts. It uses the release's download link, not the GitHub API, so many computers on one network can check without hitting GitHub's limit. AB Apps reads the same file. Downloads and installs only run in the installed app, not under `npm start`.
+- The app reads `latest.yml` from the latest release (`selfUpdates` from [ab-common](https://github.com/AB-Kevin/ab-common)) when it opens and when someone chooses **Check for updates** (Settings for managers, Profile for everyone else). A waiting update shows as **Update available** in the header. **Download and install** checks the installer against the digest, asks, then closes the app and installs over it, keeping the install folder and shortcuts. It uses the release's download link, not the GitHub API, so many computers on one network can check without hitting GitHub's limit. AB Apps reads the same file. Downloads and installs only run in the installed app, not under `npm start`.
 - The installer isn't code-signed, so Windows SmartScreen shows "Windows protected your PC" the first time it runs. Choose **More info**, then **Run anyway**.
 
 | Path | What's there |
@@ -96,9 +96,8 @@ The release appears on the repository's **Releases** page a few minutes later as
 | `src/main/invoices.js` | invoice lines, totals, numbering, voiding, templates |
 | `src/main/invoice-html.js` | the printed invoice (also used for PDFs and the template preview) |
 | `src/main/store.js` | data folder layout and file access |
-| `src/main/abapps.js` | reading who is signed in to AB Apps, its list of people, and its shared mail server |
-| `src/main/timesheets.js`, `mailer.js` | the timesheet email: schedule, who's included, the CSV files; sending over SMTP |
+| `src/main/timesheets.js` | the timesheet email: schedule, who's included, the CSV files |
 | `src/main/manage.js`, `presence.js` | people, task and settings rules; who's signed in |
-| `src/main/updates.js` | checking GitHub for a newer release and downloading its installer |
+| [ab-common](https://github.com/AB-Kevin/ab-common) | shared with the other apps: safe JSON files, who is signed in to AB Apps and its people and mail server, update checks, sending email |
 | `.github/workflows/release.yml` | builds and publishes a release when a version tag is pushed |
 | `src/renderer/` | the window: `app.js` and `styles.css` (Anabaptist Brotherhood brand tokens, light and dark) |

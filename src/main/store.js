@@ -22,7 +22,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { readJson, writeJson } = require('./jsonfile');
+const { readJson, writeJson } = require('ab-common/jsonfile');
 
 const DEFAULT_SETTINGS = {
   editWindowDays: 14, // how far back people can add, change or delete their own time; 0 for no limit

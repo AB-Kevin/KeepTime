@@ -6,18 +6,25 @@ const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const { spawn } = require('child_process');
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme, net, safeStorage } = require('electron');
-const { readJson, writeJson } = require('./jsonfile');
+const { readJson, writeJson } = require('ab-common/jsonfile');
 const { Store } = require('./store');
-const abApps = require('./abapps');
+const abApps = require('ab-common/abapps');
+const { launch } = require('ab-common/installs');
 const time = require('./time');
 const invoices = require('./invoices');
 const { renderInvoice } = require('./invoice-html');
 const presence = require('./presence');
 const manage = require('./manage');
 const timesheets = require('./timesheets');
-const mailer = require('./mailer');
+const mailer = require('ab-common/mailer');
 const Fmt = require('../shared/format');
-const { RELEASES_PAGE, checkForUpdate, downloadInstaller } = require('./updates');
+// Releases are published by .github/workflows/release.yml, each with the
+// latest.yml electron-builder writes beside the installer. AB Apps reads the
+// same file to install and update this app.
+const { RELEASES_PAGE, checkForUpdate, downloadInstaller } = require('ab-common/releases').selfUpdates({
+  repo: 'AB-Kevin/contractor-time',
+  installerName: (version) => `KeepTime-Setup-${version}.exe`, // package.json build.nsis.artifactName
+});
 
 // Kept from when this app was called Contractor Time: Windows and AB Apps know
 // the installed copy by it, so changing it would install a second copy.
@@ -440,7 +447,7 @@ function saveSmtpPassword(password) {
  * Apps, which takes mail without signing in, or else KeepTime's own.
  */
 function mailServer(settings) {
-  const shared = session && abApps.readSharedMail(identity?.dataDir ?? '');
+  const shared = session && identity ? abApps.readServices(identity.dataDir).mail : null;
   return shared ? { ...shared, user: '', shared: true } : timesheets.smtpOf(settings);
 }
 
@@ -734,7 +741,7 @@ function registerHandlers() {
     const exe = await abApps.findABApps();
     if (!exe) throw new UserError("AB Apps isn't installed on this computer. Ask a manager for its installer.");
     try {
-      await abApps.openABApps(exe);
+      await launch(exe);
     } catch (err) {
       throw new UserError(`AB Apps couldn't be opened: ${err.message}`);
     }

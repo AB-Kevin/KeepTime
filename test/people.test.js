@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const manage = require('../src/main/manage');
-const abApps = require('../src/main/abapps');
+const abApps = require('ab-common/abapps');
 
 const NOW = new Date('2026-10-12T15:00:00Z');
 
@@ -129,10 +129,6 @@ test("the AB Apps folder's people are read without their PINs", () => {
   assert.deepEqual(abApps.readDirectory(dir), [{ id: ids.ann, name: 'Ann Miller', class: 'manager', active: true }]);
 });
 
-test('AB Apps is found under the registry key electron-builder makes from its appId', () => {
-  assert.equal(abApps.appGuid('org.anabaptistbrotherhood.duplicatechecker'), '34d9e267-78ef-5071-b58d-029b778197d1');
-});
-
 test('tasks have unique names and can be retired and reordered', () => {
   const list = [];
   assert.deepEqual(manage.saveTask(list, { name: 'Claims' }), []);
@@ -153,13 +149,14 @@ test('settings are checked', () => {
 
 test('the mail server AB Apps shares is read from its folder, tidied', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'keeptime-services-'));
-  assert.equal(abApps.readSharedMail(dir), null, 'none set');
+  const readSharedMail = (folder) => abApps.readServices(folder).mail;
+  assert.equal(readSharedMail(dir), null, 'none set');
   fs.mkdirSync(path.join(dir, 'shared'));
   const write = (mail) => fs.writeFileSync(path.join(dir, 'shared', 'services.json'), JSON.stringify({ version: 1, mail, website: null }));
   write({ host: ' relay.example.org ', port: 25, secure: false, fromName: 'Anabaptist Brotherhood', fromEmail: 'info@example.org' });
-  assert.deepEqual(abApps.readSharedMail(dir), { host: 'relay.example.org', port: 25, secure: false, fromName: 'Anabaptist Brotherhood', fromEmail: 'info@example.org' });
+  assert.deepEqual(readSharedMail(dir), { host: 'relay.example.org', port: 25, secure: false, fromName: 'Anabaptist Brotherhood', fromEmail: 'info@example.org' });
   write({ host: 'relay.example.org', port: 25, fromEmail: '' });
-  assert.equal(abApps.readSharedMail(dir), null, 'incomplete');
+  assert.equal(readSharedMail(dir), null, 'incomplete');
   fs.writeFileSync(path.join(dir, 'shared', 'services.json'), '{ damaged');
-  assert.equal(abApps.readSharedMail(dir), null, 'damaged');
+  assert.equal(readSharedMail(dir), null, 'damaged');
 });

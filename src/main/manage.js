@@ -6,7 +6,7 @@
 // the list it's given and returns problems to show; an empty list means the
 // caller should save.
 //
-// Names, classes and who can sign in come from AB Apps (see abapps.js).
+// Names, classes and who can sign in come from AB Apps (see ab-common's abapps.js).
 // shared/people.json here keeps only what's particular to KeepTime,
 // one record per person id: whether they log time, their hourly rate,
 // invoice template and the number in their invoice numbers.
