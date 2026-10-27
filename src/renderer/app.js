@@ -928,13 +928,14 @@ const period = (p) => `${Fmt.date(p.from)} to ${Fmt.date(p.to)}`;
 function timesheetSection(t) {
   const s = t.schedule;
   const m = t.smtp;
+  const own = t.ownSmtp; // KeepTime's own server, the same as m unless AB Apps sets one
   const status = [];
   if (t.problem) {
     status.push(html`<div class="notice warn"><strong>The timesheets for ${period(t.problem)} weren't sent at ${when(t.problem.at)}.</strong>
       ${t.problem.message} KeepTime tries again every 15 minutes, and when the settings are saved.</div>`);
   } else if (t.waiting) {
     status.push(html`<div class="notice">The timesheets for ${period(t.waiting)} were due ${when(t.waiting.sendAt)} and haven't been sent yet.
-      They go out once a manager's KeepTime that has the mail server password is open.</div>`);
+      They go out once a manager's KeepTime${m.shared ? '' : ' that has the mail server password'} is open.</div>`);
   }
   if (s.enabled && !t.canSendHere) {
     status.push(html`<div class="notice">KeepTime on this computer can't send the email until the mail server's password is entered here.
@@ -967,24 +968,29 @@ function timesheetSection(t) {
         it covers the two weeks from Monday to the Sunday just past. Only completed time is included.</p>
 
       <h3 style="margin-bottom: 4px">Mail server</h3>
-      <p class="small muted" style="margin-bottom: 12px">The account the email is sent from, over SMTP.</p>
+      ${m.shared
+        ? html`<div class="notice" style="margin-bottom: 12px">The email goes through the server a manager set in AB Apps, <strong>${m.host}</strong>,
+            from ${m.fromName ? `${m.fromName} <${m.fromEmail}>` : m.fromEmail}. A manager changes it on AB Apps' Mail and website page.</div>
+          <details class="own-settings"><summary>KeepTime's own mail server, used when AB Apps doesn't set one</summary>`
+        : html`<p class="small muted" style="margin-bottom: 12px">The account the email is sent from, over SMTP.</p>`}
       <div class="field-row">
-        <div class="field"><label for="ts-host">SMTP server</label><input type="text" id="ts-host" name="host" maxlength="200" value="${m.host}" placeholder="smtp.office365.com"></div>
-        <div class="field"><label for="ts-port">Port</label><input type="number" id="ts-port" name="port" min="1" max="65535" value="${m.port}"></div>
+        <div class="field"><label for="ts-host">SMTP server</label><input type="text" id="ts-host" name="host" maxlength="200" value="${own.host}" placeholder="smtp.office365.com"></div>
+        <div class="field"><label for="ts-port">Port</label><input type="number" id="ts-port" name="port" min="1" max="65535" value="${own.port}"></div>
       </div>
-      <label class="check"><input type="checkbox" name="secure"${flag(m.secure, 'checked')}> Use SSL from the start (usually port 465). Leave off for port 587.</label>
+      <label class="check"><input type="checkbox" name="secure"${flag(own.secure, 'checked')}> Use SSL from the start (usually port 465). Leave off for port 587.</label>
       <div class="field-row">
-        <div class="field"><label for="ts-user">Username</label><input type="text" id="ts-user" name="user" maxlength="200" value="${m.user}" autocomplete="off"></div>
+        <div class="field"><label for="ts-user">Username</label><input type="text" id="ts-user" name="user" maxlength="200" value="${own.user}" autocomplete="off"></div>
         <div class="field"><label for="ts-pass">Password</label><input type="password" id="ts-pass" name="password" maxlength="500" autocomplete="new-password"
           placeholder="${t.hasPassword ? 'Saved on this computer' : ''}"></div>
       </div>
       <p class="hint" style="margin: -4px 0 16px">The password is kept on this computer only, protected by Windows for your account. Each manager whose KeepTime
         should send enters it once on their own computer. Leave the username blank for a mail relay that doesn't sign in.</p>
       <div class="field-row">
-        <div class="field"><label for="ts-from">From address</label><input type="email" id="ts-from" name="fromEmail" maxlength="200" value="${m.fromEmail}">
+        <div class="field"><label for="ts-from">From address</label><input type="email" id="ts-from" name="fromEmail" maxlength="200" value="${own.fromEmail}">
           <span class="hint">Leave blank to use the username.</span></div>
-        <div class="field"><label for="ts-name">From name</label><input type="text" id="ts-name" name="fromName" maxlength="100" value="${m.fromName}"></div>
+        <div class="field"><label for="ts-name">From name</label><input type="text" id="ts-name" name="fromName" maxlength="100" value="${own.fromName}"></div>
       </div>
+      ${m.shared ? raw('</details>') : ''}
       <div class="field" style="max-width: 360px"><label for="ts-test">Send a test to</label>
         <input type="email" id="ts-test" name="testAddress" maxlength="200" value="${t.testAddress}">
         <span class="hint">A test goes only to this address, with the latest period's timesheets.</span></div>

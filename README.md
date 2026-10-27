@@ -52,7 +52,8 @@ On a schedule, KeepTime emails a CSV file of each employee's and manager's time 
 
 - **The period** is the week, two weeks or four weeks before the day it's sent, through the day before. Sent on a Monday, it covers through the Sunday just past. Setting the first send date lines it up with your pay periods.
 - **Who sends it:** KeepTime has no server, so any manager's KeepTime sends it, if it's open at the time, or as soon as one is opened afterward. Each manager's app records what it sent in their own folder, and the others skip a period someone has sent. Managers' apps wait their turn, ten minutes apart, so the first one's record has time to sync. If OneDrive is slower than that, two copies can still go out. If the apps were closed through several sends, only the latest period is sent.
-- **The mail server** is any SMTP server, as in FormTracker. Its settings are shared, but **its password is kept on each computer**, encrypted for that Windows account, because everyone who logs time can read the shared folder. Each manager whose KeepTime should send enters it once on their own computer. Leave the username blank for a relay that accepts mail without signing in.
+- **AB Apps' mail server**, when a manager has set one on AB Apps' **Mail and website** page, is used instead of KeepTime's own, without signing in, so any manager's KeepTime can send. KeepTime's own server settings are folded away under it.
+- **The mail server** is otherwise any SMTP server, as in FormTracker. Its settings are shared, but **its password is kept on each computer**, encrypted for that Windows account, because everyone who logs time can read the shared folder. Each manager whose KeepTime should send enters it once on their own computer. Leave the username blank for a relay that accepts mail without signing in.
 - **Microsoft 365:** `smtp.office365.com`, port 587, works only while the account is allowed to use SMTP AUTH with a password. Microsoft plans to turn that off for existing tenants at the end of December 2026, though an admin can turn it back on until a final retirement date Microsoft hasn't set yet. A Gmail account with an app password, or a sending service such as SMTP2GO, avoids that.
 - If sending fails, Settings shows why, and KeepTime tries again every 15 minutes. **Save and send a test** sends the latest period to the test address only.
 
@@ -95,7 +96,7 @@ The release appears on the repository's **Releases** page a few minutes later as
 | `src/main/invoices.js` | invoice lines, totals, numbering, voiding, templates |
 | `src/main/invoice-html.js` | the printed invoice (also used for PDFs and the template preview) |
 | `src/main/store.js` | data folder layout and file access |
-| `src/main/abapps.js` | reading who is signed in to AB Apps, and its list of people |
+| `src/main/abapps.js` | reading who is signed in to AB Apps, its list of people, and its shared mail server |
 | `src/main/timesheets.js`, `mailer.js` | the timesheet email: schedule, who's included, the CSV files; sending over SMTP |
 | `src/main/manage.js`, `presence.js` | people, task and settings rules; who's signed in |
 | `src/main/updates.js` | checking GitHub for a newer release and downloading its installer |

@@ -172,9 +172,10 @@ const smtpOf = (settings) => ({ ...DEFAULT_SMTP, ...settings.smtp });
 /**
  * Checks the timesheet email settings as typed. Returns { errors, schedule, smtp,
  * testAddress } ready to save. `previous` is the saved schedule: changing when it sends
- * marks it changed, so earlier sends aren't made up (see `due`).
+ * marks it changed, so earlier sends aren't made up (see `due`). With `ownServer`
+ * false, AB Apps sets the mail server, so KeepTime's own may be left blank.
  */
-function readSettings(input, previous, now) {
+function readSettings(input, previous, now, { ownServer = true } = {}) {
   const errors = [];
   const recipients = parseRecipients(input.recipients);
   const everyWeeks = Number(input.everyWeeks);
@@ -200,9 +201,9 @@ function readSettings(input, previous, now) {
     fromEmail: String(input.fromEmail ?? '').trim(),
     fromName: String(input.fromName ?? '').trim().replace(/["<>\r\n]/g, ''),
   };
-  if (enabled && !smtp.host) errors.push('Enter the mail server.');
+  if (enabled && ownServer && !smtp.host) errors.push('Enter the mail server.');
   if (!Number.isInteger(port) || port < 1 || port > 65535) errors.push('The port is a number such as 587 or 465.');
-  if (smtp.fromEmail ? !EMAIL.test(smtp.fromEmail) : enabled && !EMAIL.test(smtp.user)) {
+  if (smtp.fromEmail ? !EMAIL.test(smtp.fromEmail) : enabled && ownServer && !EMAIL.test(smtp.user)) {
     errors.push('Enter the address the email comes from.');
   }
   if (smtp.fromName.length > 100 || smtp.host.length > 200 || smtp.user.length > 200) errors.push('Keep each field under 100 characters.');

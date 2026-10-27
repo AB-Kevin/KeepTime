@@ -150,3 +150,16 @@ test('settings are checked', () => {
   assert.deepEqual(manage.settingsProblems({ editWindowDays: '14', longTimerHours: '10' }), []);
   assert.equal(manage.settingsProblems({ editWindowDays: '-1', longTimerHours: '0' }).length, 2);
 });
+
+test('the mail server AB Apps shares is read from its folder, tidied', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'keeptime-services-'));
+  assert.equal(abApps.readSharedMail(dir), null, 'none set');
+  fs.mkdirSync(path.join(dir, 'shared'));
+  const write = (mail) => fs.writeFileSync(path.join(dir, 'shared', 'services.json'), JSON.stringify({ version: 1, mail, website: null }));
+  write({ host: ' relay.example.org ', port: 25, secure: false, fromName: 'Anabaptist Brotherhood', fromEmail: 'info@example.org' });
+  assert.deepEqual(abApps.readSharedMail(dir), { host: 'relay.example.org', port: 25, secure: false, fromName: 'Anabaptist Brotherhood', fromEmail: 'info@example.org' });
+  write({ host: 'relay.example.org', port: 25, fromEmail: '' });
+  assert.equal(abApps.readSharedMail(dir), null, 'incomplete');
+  fs.writeFileSync(path.join(dir, 'shared', 'services.json'), '{ damaged');
+  assert.equal(abApps.readSharedMail(dir), null, 'damaged');
+});

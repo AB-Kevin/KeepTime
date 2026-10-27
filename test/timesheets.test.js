@@ -118,6 +118,8 @@ test('settings are checked as typed, and changing when it sends is dated', () =>
   assert.match(errors({ user: '', fromEmail: '' }), /comes from/);
   assert.match(errors({ testAddress: 'me' }), /me isn't an email address/);
   assert.equal(errors({ enabled: false, recipients: '', host: '', firstSend: '', user: '' }), '', 'turned off, it can be left blank');
+  const shared = ts.readSettings({ ...input, host: '', user: '', fromEmail: '' }, null, now, { ownServer: false });
+  assert.deepEqual(shared.errors, [], "AB Apps sets the server, so KeepTime's own can be blank");
 });
 
 test('the log records what was sent', () => {

@@ -46,6 +46,26 @@ function readIdentity(appDataDir) {
   return { personId, name: name.trim(), class: personClass, signedInAt: signedInAt ?? null, dataDir };
 }
 
+/**
+ * The mail server a manager set on AB Apps' Mail and website page, from its
+ * folder's shared/services.json: { host, port, secure, fromName, fromEmail },
+ * or null when there's none or it can't be read. It takes mail without
+ * signing in.
+ */
+function readSharedMail(dataDir) {
+  let services;
+  try {
+    services = readJson(path.join(dataDir, 'shared', 'services.json'), null);
+  } catch {
+    return null;
+  }
+  const mail = services?.version === 1 ? services.mail : null;
+  const port = Number(mail?.port);
+  const text = (value) => (typeof value === 'string' ? value.trim() : '');
+  if (!text(mail?.host) || !text(mail?.fromEmail) || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+  return { host: text(mail.host), port, secure: mail.secure === true, fromName: text(mail.fromName), fromEmail: text(mail.fromEmail) };
+}
+
 /** Everyone in the AB Apps folder, as { id, name, class, active }. Throws if the folder can't be read. */
 function readDirectory(dataDir) {
   const file = path.join(dataDir, 'shared', 'people.json');
@@ -89,4 +109,4 @@ function openABApps(exe) {
   });
 }
 
-module.exports = { CLASSES, identityPath, readIdentity, readDirectory, appGuid, findABApps, openABApps };
+module.exports = { CLASSES, identityPath, readIdentity, readDirectory, readSharedMail, appGuid, findABApps, openABApps };

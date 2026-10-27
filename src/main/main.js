@@ -435,6 +435,15 @@ function saveSmtpPassword(password) {
   saveConfig({ smtpPassword: safeStorage.encryptString(password).toString('base64') });
 }
 
+/**
+ * The server the timesheet email goes through: the one a manager set in AB
+ * Apps, which takes mail without signing in, or else KeepTime's own.
+ */
+function mailServer(settings) {
+  const shared = session && abApps.readSharedMail(identity?.dataDir ?? '');
+  return shared ? { ...shared, user: '', shared: true } : timesheets.smtpOf(settings);
+}
+
 /** Whether this computer can send: it has the password, unless the server takes mail without one. */
 const canSendHere = (smtp) => Boolean(smtp.host) && (!smtp.user || Boolean(smtpPassword()));
 
@@ -446,7 +455,7 @@ async function sendTimesheets(occ, to, { test = false } = {}) {
     .map((p) => ({ name: p.name, active: p.active, entries: store.entries(p.id) }));
   const email = timesheets.buildEmail({ from: occ.from, to: occ.to, people: included, test });
   try {
-    await mailer.sendMail({ ...timesheets.smtpOf(settings), password: smtpPassword() }, { to, ...email });
+    await mailer.sendMail({ ...mailServer(settings), password: smtpPassword() }, { to, ...email });
   } catch (err) {
     throw new UserError(`The timesheet email couldn't be sent: ${err.message}`);
   }
@@ -470,7 +479,7 @@ async function sendTimesheetsIfDue() {
   const settings = store.settings();
   const schedule = timesheets.scheduleOf(settings);
   const occ = timesheets.due(schedule, now);
-  if (!occ || timesheetsSentHere.has(occ.key) || !canSendHere(timesheets.smtpOf(settings))) return;
+  if (!occ || timesheetsSentHere.has(occ.key) || !canSendHere(mailServer(settings))) return;
   const managers = everyone.filter((p) => p.manager && p.active).sort((a, b) => a.id.localeCompare(b.id));
   if (managers.some((m) => timesheets.wasSent(store.timesheetLog(m.id), occ.key))) return;
   const turn = managers.findIndex((m) => m.id === person.id);
@@ -494,7 +503,7 @@ async function sendTimesheetsIfDue() {
 function timesheetStatus() {
   const settings = store.settings();
   const schedule = timesheets.scheduleOf(settings);
-  const smtp = timesheets.smtpOf(settings);
+  const smtp = mailServer(settings);
   const now = new Date();
   const sent = people()
     .filter((p) => p.manager)
@@ -507,6 +516,7 @@ function timesheetStatus() {
   return {
     schedule,
     smtp,
+    ownSmtp: timesheets.smtpOf(settings),
     hasPassword: Boolean(smtpPassword()),
     canSendHere: canSendHere(smtp),
     testAddress: loadConfig().timesheetTestAddress ?? '',
@@ -992,7 +1002,9 @@ function registerHandlers() {
 
   handle('mgr:timesheets:save', (input) => {
     asManager();
-    const { errors, schedule, smtp, testAddress } = timesheets.readSettings(input, store.settings().timesheets, new Date());
+    const { errors, schedule, smtp, testAddress } = timesheets.readSettings(input, store.settings().timesheets, new Date(), {
+      ownServer: !mailServer(store.settings()).shared,
+    });
     fail(errors);
     if (input.password) saveSmtpPassword(String(input.password));
     saveConfig({ timesheetTestAddress: testAddress });
@@ -1004,7 +1016,7 @@ function registerHandlers() {
   handle('mgr:timesheets:test', async () => {
     asManager();
     const settings = store.settings();
-    const smtp = timesheets.smtpOf(settings);
+    const smtp = mailServer(settings);
     const address = loadConfig().timesheetTestAddress;
     if (!address) throw new UserError('Enter an address to send the test to.');
     if (!smtp.host) throw new UserError('Enter the mail server.');

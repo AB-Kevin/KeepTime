@@ -330,6 +330,9 @@ textarea { resize: vertical; min-height: 72px; }
 }
 .notice.warn { border-left-color: var(--border-action); background: var(--surface-card-alt); }
 .notice ul { margin: var(--space-2) 0 0; padding-left: var(--space-5); }
+/* Settings AB Apps overrides, folded away under its note. */
+details.own-settings { margin-bottom: var(--space-4); }
+details.own-settings > summary { cursor: pointer; color: var(--text-muted); font-size: 13px; margin-bottom: var(--space-3); }
 
 /* Cards: the one rounded object. */
 .card { background: var(--surface-card); border-radius: var(--radius-card); padding: var(--space-4) var(--space-5) var(--space-5); }
