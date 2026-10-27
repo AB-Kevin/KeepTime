@@ -1,7 +1,7 @@
 {
   "name": "keeptime",
   "productName": "KeepTime",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Time tracking and invoicing for remote contractors, kept in a shared OneDrive folder.",
   "author": "Anabaptist Brotherhood",
   "license": "UNLICENSED",
