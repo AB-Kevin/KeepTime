@@ -911,10 +911,17 @@ async function settingsView() {
     </form>
     ${timesheetSection(await api.timesheets())}
     <div class="section"><h2>Data folder</h2>
-      <p class="small muted" style="margin-top: 4px">Where this computer finds KeepTime's data. Each computer chooses it once.</p>
+      ${state.folder?.reason === 'not-moved'
+        ? html`<div class="notice warn" style="margin: 8px 0">KeepTime's data belongs in the AB Apps folder now, where every computer finds it by itself:
+            <span class="path">${state.folder.target}</span> Moving it copies everything there; this folder is kept as it was, and every other computer
+            switches over on its own within a minute or two. <div class="actions" style="margin-top: 8px">
+            <button class="btn btn-primary" data-action="move-folder">Move to the AB Apps folder</button></div></div>`
+        : html`<p class="small muted" style="margin-top: 4px">${state.folder?.reason === 'ab-apps'
+            ? "KeepTime's subfolder of the AB Apps folder, which every computer finds by itself."
+            : "Where this computer finds KeepTime's data. Each computer chooses it once."}</p>`}
       <p class="path">${state.dataDir}</p>
       <div class="actions"><button class="btn btn-secondary" data-action="open-folder">Open folder</button>
-        <button class="btn btn-ghost" data-action="change-folder">Use a different folder on this computer</button></div>
+        ${state.folder?.reason === 'ab-apps' ? '' : html`<button class="btn btn-ghost" data-action="change-folder">Use a different folder on this computer</button>`}</div>
     </div>
     ${appearanceSection()}
     ${updatesSection()}
@@ -1201,6 +1208,19 @@ const ACTIONS = {
   },
 
   'open-folder': () => api.openFolder(),
+
+  async 'move-folder'() {
+    const ok = await confirmDialog({
+      title: 'Move the data to the AB Apps folder?',
+      body: `Everything in ${state.dataDir} is copied to ${state.folder.target}, and every computer uses it from there. The current folder is left as it was, as a backup you can delete later.`,
+      button: 'Move',
+    });
+    if (!ok) return;
+    const { files, state: next } = await api.moveFolder();
+    state = next;
+    render();
+    toast(`Moved: ${files.toLocaleString()} files are in the AB Apps folder now.`);
+  },
 
   async 'check-update'() {
     update.checking = true;

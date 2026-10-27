@@ -9,11 +9,10 @@ There is no separate sign-in: KeepTime uses whoever is signed in to [AB Apps](ht
 
 ## Setting it up
 
-1. Set up AB Apps, and add everyone there. Then make a folder in OneDrive or SharePoint, for example `KeepTime`. Share it with every manager and contractor, with edit access.
-2. Everyone syncs it to their computer. For a OneDrive folder shared with you, use **Add shortcut to My files**; for a SharePoint library, use **Sync**. Then right-click the folder and choose **Always keep on this device**.
-3. Install and open the app. Choose the synced folder.
-4. A manager opens the empty folder first and sets it up. Then they add tasks (Shared › Tasks) and check the invoice template's bill-to address (Shared › Invoice templates). Contractors set their own hourly rates on their Profile, or a manager can on Manage › People. A contractor can log time before their rate is set, but can't create invoices until it is.
-5. To have timesheets emailed, a manager fills in **Timesheet email** on Settings and sends a test.
+1. Set up AB Apps, and add everyone there. KeepTime keeps its data in the `KeepTime` subfolder of the AB Apps folder, which every computer already syncs, so there's no folder to make or choose.
+2. Install and open the app.
+3. A manager opens it first and sets it up. Then they add tasks (Shared › Tasks) and check the invoice template's bill-to address (Shared › Invoice templates). Contractors set their own hourly rates on their Profile, or a manager can on Manage › People. A contractor can log time before their rate is set, but can't create invoices until it is.
+4. To have timesheets emailed, a manager fills in **Timesheet email** on Settings and sends a test.
 
 Each computer chooses the folder only once.
 
@@ -22,6 +21,9 @@ Each computer chooses the folder only once.
 Before version 0.2, this app kept its own people and PINs. AB Apps 0.1.0 to 0.1.2 moved them across with **Import from Contractor Time** on the People page, keeping everyone's id so their time and invoices stayed theirs. AB Apps 0.1.3 removed that import once the move was done. Someone added on AB Apps' People page now gets a new id, so a folder from before 0.2 that was never imported doesn't link to them: import it with AB Apps 0.1.2 first. Rates, templates and invoice numbers stay in this folder.
 
 ## How the data is stored
+
+**Moving older data in.** Data that was in a KeepTime folder of its own before stays there until a manager moves it once, from **Settings → Data folder → Move to the AB Apps folder**: it's copied into the subfolder, the old folder is kept as it was, and a note left there sends every other computer along within a minute or so. Each person's time saved on another computer in that minute is brought across when it follows.
+
 
 OneDrive can't merge two computers' changes to one file. When that happens it keeps both copies, as `entries-LAPTOP.json`. To avoid that, each person's own files are written only by them, and a save to a shared file changes only one record:
 

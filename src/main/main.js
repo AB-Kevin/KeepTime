@@ -10,6 +10,7 @@ const { readJson, writeJson } = require('ab-common/jsonfile');
 const { Store } = require('./store');
 const abApps = require('ab-common/abapps');
 const { launch } = require('ab-common/installs');
+const { appFolder, samePath, chooseFolder, readMovedNote, moveToAbApps } = require('ab-common/appfolder');
 const time = require('./time');
 const invoices = require('./invoices');
 const { renderInvoice } = require('./invoice-html');
@@ -53,6 +54,9 @@ let latestRelease = null; // from the last update check; updates are only downlo
 let installing = null;
 let timesheetSending = null; // the timesheet email being sent
 let timesheetRetryAt = 0;
+// Which folder the data is in, and why (see openStore): its own setting, the
+// AB Apps folder's KeepTime subfolder, or still its own waiting to be moved there.
+let folderChoice = { dir: null, reason: 'own', target: null };
 const timesheetsSentHere = new Set(); // periods sent this session, in case recording one failed
 
 const updatesDir = () => path.join(app.getPath('temp'), 'KeepTime updates');
@@ -81,9 +85,52 @@ function moveOldSettings() {
   }
 }
 
+// KeepTime's data lives in the KeepTime subfolder of the AB Apps folder
+// (ab-common's appfolder.js). Data that's still somewhere else stays there
+// until a manager moves it from Settings; every other computer follows the
+// note the move leaves behind.
+const FOLDER_NAME = 'KeepTime';
+const hasKeepTimeData = (dir) => fs.existsSync(path.join(dir, 'shared', 'people.json'));
+
 function openStore() {
-  const { dataDir } = loadConfig();
-  store = dataDir && fs.existsSync(dataDir) ? new Store(dataDir) : null;
+  const own = loadConfig().dataDir ?? null;
+  const target = identity?.dataDir && fs.existsSync(identity.dataDir) ? appFolder(identity, FOLDER_NAME) : null;
+  folderChoice = { ...chooseFolder({ own, target, hasData: hasKeepTimeData }), target };
+  const { dir } = folderChoice;
+  if (folderChoice.reason === 'ab-apps' && !samePath(own, dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    if (own && readMovedNote(own)) carryOwnFiles(own, dir);
+    saveConfig({ dataDir: dir });
+  }
+  store = dir && fs.existsSync(dir) ? new Store(dir) : null;
+}
+
+/**
+ * After a manager moved the data, the time this person saved here between
+ * the copy and this computer seeing the note is only in the old folder. Each
+ * person's files have one writer -- them -- so theirs are brought across,
+ * where newer.
+ */
+function carryOwnFiles(from, to) {
+  if (!identity?.personId) return;
+  const source = path.join(from, 'people', identity.personId);
+  const target = path.join(to, 'people', identity.personId);
+  let names;
+  try {
+    names = fs.readdirSync(source);
+  } catch {
+    return;
+  }
+  fs.mkdirSync(target, { recursive: true });
+  for (const name of names) {
+    const a = path.join(source, name);
+    const b = path.join(target, name);
+    try {
+      if (!fs.existsSync(b) || fs.statSync(a).mtimeMs > fs.statSync(b).mtimeMs) fs.copyFileSync(a, b);
+    } catch {
+      // Left in the old folder; nothing there is removed.
+    }
+  }
 }
 
 // Light, dark, or whatever Windows is set to. Each computer keeps its own; the
@@ -157,9 +204,14 @@ function startSession() {
 function checkIdentity() {
   const next = abApps.readIdentity(app.getPath('appData'));
   const changed = (next?.personId ?? null) !== (identity?.personId ?? null) || next?.name !== identity?.name || next?.dataDir !== identity?.dataDir;
+  const folderChanged = next?.dataDir !== identity?.dataDir;
   identity = next;
   if (!changed) return;
   if (session && session.personId !== next?.personId) signOut();
+  if (folderChanged) {
+    if (session) signOut();
+    openStore();
+  }
   win?.webContents.send('identity-changed');
 }
 
@@ -551,6 +603,8 @@ function screenState() {
   return {
     screen: 'app',
     dataDir: store.dataDir,
+    // Where the data is: 'ab-apps', 'own', or 'not-moved' with where it belongs.
+    folder: { reason: folderChoice.reason, target: folderChoice.target },
     computer: presence.computerName(),
     me: me(),
     settings: store.settings(),
@@ -718,6 +772,25 @@ function registerHandlers() {
   });
 
   handle('update:page', () => shell.openExternal(latestRelease?.pageUrl ?? RELEASES_PAGE));
+
+  // A manager moves the data into the AB Apps folder, once. Every other
+  // computer follows the note it leaves, and the old folder is kept as it was.
+  handle('folder:move', () => {
+    const person = asManager();
+    if (folderChoice.reason !== 'not-moved') throw new UserError("KeepTime's data is already in the AB Apps folder.");
+    const from = store.dataDir;
+    const to = folderChoice.target;
+    signOut(); // nothing more is written to the old folder from here
+    let files;
+    try {
+      files = moveToAbApps({ from, to, folder: FOLDER_NAME, by: person.name });
+    } catch (err) {
+      throw new UserError(err.message);
+    }
+    saveConfig({ dataDir: to });
+    openStore();
+    return { files, state: appState() };
+  });
 
   handle('folder:open', () => {
     if (store) shell.openPath(store.dataDir);
@@ -1054,6 +1127,14 @@ function registerHandlers() {
   });
 }
 
+/** A manager moved the data while this computer had it open: follow it to the AB Apps folder. */
+function followMove() {
+  if (folderChoice.reason !== 'not-moved' || !store || !readMovedNote(store.dataDir)) return;
+  signOut();
+  openStore();
+  win?.webContents.send('identity-changed');
+}
+
 function startHeartbeat() {
   clearInterval(heartbeat);
   writePresence();
@@ -1064,6 +1145,7 @@ function startHeartbeat() {
       console.error('presence', err);
     }
     checkTimesheets();
+    followMove();
   }, presence.HEARTBEAT_MS);
   setTimeout(checkTimesheets, 5000); // after the window has what it needs to draw
 }
@@ -1089,8 +1171,8 @@ app.whenReady().then(() => {
   } catch {
     // The installer that just ran may still be closing; it is removed next time.
   }
-  openStore();
   identity = abApps.readIdentity(app.getPath('appData'));
+  openStore();
   // AB Apps rewrites or removes the file as people sign in and out there.
   fs.watchFile(abApps.identityPath(app.getPath('appData')), { interval: 2000 }, checkIdentity);
   registerHandlers();

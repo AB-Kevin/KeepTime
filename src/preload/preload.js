@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
   getState: () => call('state:get'),
   chooseFolder: () => call('folder:choose'),
   openFolder: () => call('folder:open'),
+  moveFolder: () => call('folder:move'),
   setTheme: (theme) => call('theme:set', theme),
   checkForUpdate: () => call('update:check'),
   installUpdate: () => call('update:install'),
