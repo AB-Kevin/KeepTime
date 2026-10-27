@@ -1,6 +1,6 @@
 # KeepTime (desktop)
 
-A Windows desktop app for remote contractors to log time and create invoices. Its data is kept in a shared OneDrive folder. It used to be called Contractor Time.
+A Windows desktop app for remote contractors to log time and create invoices. Its data is kept in a shared OneDrive folder. It used to be called Contractor Time, and its repository AB-Kevin/contractor-time, which GitHub still redirects here. Windows and AB Apps still know it by its old app id and catalog id, `org.anabaptistbrotherhood.contractortime` and `contractor-time`, so those never change.
 
 - **Contractors** start and stop a timer, choose a task from a list or describe the work in their own words, and correct their own time. They set their own hourly rate and choose their invoice template, create invoices from their completed time, and print them or save them as PDFs. They can also add and change tasks and invoice templates, which everyone shares, except the default template.
 - **Managers** see who's signed in and whose timer is running. They can also set anyone's hourly rate and invoice template. Only managers change the default template, which new contractors use. They can view, print or save any contractor's invoice. They can have employees' and managers' timesheets emailed every week, two weeks or four (see [Timesheet email](#timesheet-email)).

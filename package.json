@@ -1,5 +1,5 @@
 {
-  "name": "keeptime-desktop",
+  "name": "keeptime",
   "productName": "KeepTime",
   "version": "0.3.0",
   "description": "Time tracking and invoicing for remote contractors, kept in a shared OneDrive folder.",
@@ -33,7 +33,7 @@
     "publish": {
       "provider": "github",
       "owner": "AB-Kevin",
-      "repo": "contractor-time",
+      "repo": "KeepTime",
       "releaseType": "release"
     },
     "win": {

@@ -22,7 +22,7 @@ const Fmt = require('../shared/format');
 // latest.yml electron-builder writes beside the installer. AB Apps reads the
 // same file to install and update this app.
 const { RELEASES_PAGE, checkForUpdate, downloadInstaller } = require('ab-common/releases').selfUpdates({
-  repo: 'AB-Kevin/contractor-time',
+  repo: 'AB-Kevin/KeepTime',
   installerName: (version) => `KeepTime-Setup-${version}.exe`, // package.json build.nsis.artifactName
 });
 
