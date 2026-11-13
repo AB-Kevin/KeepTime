@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('api', {
   timesheets: () => call('mgr:timesheets'),
   saveTimesheets: (input) => call('mgr:timesheets:save', input),
   testTimesheets: () => call('mgr:timesheets:test'),
+  exportTimesheets: () => call('mgr:timesheets:export'),
   allInvoices: () => call('mgr:invoices'),
   personEntries: (personId, from, to) => call('mgr:entries', { personId, from, to }),
 });

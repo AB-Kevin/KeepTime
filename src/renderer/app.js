@@ -1004,6 +1004,7 @@ function timesheetSection(t) {
       <div class="actions">
         <button class="btn btn-primary" type="submit" name="op" value="save">Save timesheet email</button>
         <button class="btn btn-secondary" type="submit" name="op" value="test">Save and send a test</button>
+        <button class="btn btn-secondary" type="button" data-action="export-timesheets">Save CSV files to a folder</button>
       </div>
     </form></div>`;
 }
@@ -1285,6 +1286,13 @@ const ACTIONS = {
   async invoice(d) {
     const saved = await api.invoiceOutput(d.person, d.id, d.op);
     if (saved) toast(`Saved ${saved.split(/[\\/]/).pop()}.`, { action: { label: 'Open', run: () => api.openFile(saved) } });
+  },
+
+  async 'export-timesheets'() {
+    const saved = await api.exportTimesheets();
+    if (saved) {
+      toast(`Saved ${saved.files} CSV file${saved.files === 1 ? '' : 's'} for ${period(saved)}.`, { action: { label: 'Open folder', run: () => api.openFile(saved.folder) } });
+    }
   },
 
   'void-invoice': (d) =>

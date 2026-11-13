@@ -1107,6 +1107,27 @@ function registerHandlers() {
     return address;
   });
 
+  // Saves the same CSV files the email would attach, to a folder on this computer, without sending anything.
+  handle('mgr:timesheets:export', async () => {
+    asManager();
+    const settings = store.settings();
+    const schedule = timesheets.scheduleOf(settings);
+    const occ = timesheets.latest({ ...schedule, firstSend: schedule.firstSend ?? Fmt.dayKey(new Date()) }, new Date());
+    const included = people()
+      .filter(timesheets.included)
+      .map((p) => ({ name: p.name, active: p.active, entries: store.entries(p.id) }));
+    const { attachments } = timesheets.buildEmail({ from: occ.from, to: occ.to, people: included });
+    if (!attachments.length) throw new UserError(`No one logged time for ${Fmt.date(occ.from)} to ${Fmt.date(occ.to)}.`);
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: 'Save timesheet CSV files to',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (canceled || !filePaths.length) return null;
+    for (const a of attachments) fs.writeFileSync(path.join(filePaths[0], a.filename), a.content);
+    savedFiles.add(filePaths[0]);
+    return { folder: filePaths[0], files: attachments.length, from: occ.from, to: occ.to };
+  });
+
   handle('mgr:invoices', () => {
     asManager();
     const list = [];
